@@ -3,12 +3,13 @@ import os
 import datetime
 from datetime import timedelta
 from random import randrange
+from random import random
+from random import randint
 from spade.message import Message
 import math
 import json
-from random import random
-import random
 import numpy as np
+
 """General Functions"""
 
 def agents_data():
@@ -21,10 +22,10 @@ def agent_jid(agent_directory, agent_full_name):
     agents_df = agents_data()
     agents_df = agents_df.loc[agents_df['Name'] == agent_full_name]
     agents_df = agents_df.reset_index(drop=True)
-    jid_direction = agents_df['User name'].iloc[-1]
-    print(f"{agent_full_name}{jid_direction}")
+    jid_direction = agents_df.loc[agents_df.Name == agent_full_name, 'User name']
+    jid_direction = jid_direction.values
+    jid_direction = jid_direction[0]
     return jid_direction
-
 
 def agent_passwd(agent_directory, agent_full_name):
     agents_df = agents_data()
@@ -44,6 +45,8 @@ def my_full_name(agent_name, agent_number):
     elif agent_name == "log":
         full_name = agent_name
     elif agent_name == "browser":
+        full_name = agent_name
+    elif agent_name == "launcher":
         full_name = agent_name
     else:
         if len(str(agent_number)) == 1:
@@ -131,29 +134,26 @@ def set_agent_parameters(agent_directory, agent_name, agent_full_name):
     agents_df = agents_data()
     agents_df = agents_df.loc[agents_df['Name'] == agent_full_name]
     agents_df = agents_df.reset_index(drop=True)
-    if agent_name == 'ca':
-        agent_data = agent_data.reindex(columns=['id', 'agent_type', 'location_1', 'location_2', 'location', 'purpose', 'request_type', 'time', 'activation_time', 'setup_speed', 'T1', 'T2', 'T3', 'T4', 'T5', 'q'])
-        agent_data = ca_parameters(agent_data, agents_df, agent_name)
-    elif agent_name == "wh":
-        agent_data.at[0, 'location'] = agents_df.loc[0, 'Location']
-        agent_data.at[0, 'capacity'] = agents_df.loc[0, 'Capacity']
+    if agent_name == "wh":
+        agent_data.at[0, 'location'] = agents_df.at[0, 'Location']
+        agent_data.at[0, 'capacity'] = agents_df.at[0, 'Capacity']
         agent_data.at[0, 'load'] = 0
         agent_data = agent_data.reindex(
             columns=['id', 'agent_type', 'location_1', 'location_2', 'location', 'purpose', 'request_type', 'time', 'activation_time', 'coil_in', 'coil_out', 'rack', 'capacity', 'load'])
     elif agent_name == "coil":
         agent_data = agent_data.reindex(
             columns=['id', 'agent_type', 'location_1', 'location_2', 'location', 'purpose', 'request_type', 'time', 'activation_time', 'to_do', 'entered_auction', 'int_fab', 'bid', 'bid_status', 'coil_length', 'coil_width', 'coil_thickness', 'paramater_F', 'coil_weight', 'setup_speed', 'budget', 'ship_date'])
-        agent_data = coil_parameters(agent_data, agents_df, agent_name)
+        agent_data = coil_parameters(agent_data, agents_df, agent_full_name)
     elif agent_name == "tc":
-        agent_data.at[0, 'location'] = agents_df.loc[0, 'Location']
+        agent_data.at[0, 'location'] = agents_df.at[0, 'Location']
     elif agent_name == "nww":
-        agent_data=agent_data.reindex(columns=['id','agent_type','location_1', 'location_2', 'location', 'purpose', 'request_type', 'time', 'activation_time','coil_length', 'coil_width', 'coil_thickness', 'coil_weight'])
-        agent_data=nww_parameters(agent_data,agents_df,agent_name)
+        agent_data=agent_data.reindex(columns=['id','agent_type','location_1', 'location_2', 'location', 'purpose', 'request_type', 'time', 'activation_time','coil_length', 'coil_width', 'coil_thickness', 'coil_weight','lot_size'])
+        agent_data=nww_parameters(agent_data,agents_df,agent_full_name)
     else:
         agents_df = agents_data()
-        df = agents_df.loc[agents_df['Name'] == agent_name]
+        df = agents_df.loc[agents_df['Name'] == agent_full_name]
         df = df.reset_index(drop=True)
-        agent_data.at[0, 'location'] = df.loc[0, 'Location']
+        agent_data.at[0, 'location'] = df.loc[agents_df.Name==agent_full_name, 'Location']
     agent_data.to_csv(f'{agent_directory}''/'f'{agent_full_name}.csv', index=False, header=True)
 
 
@@ -167,19 +167,19 @@ def set_agent_parameters(agent_directory, agent_name, agent_full_name):
 #     wh_register_df.to_csv(f'{agent_directory}''/'f'{agent_full_name}_register.csv', index=False, header=True)
 
 
-def coil_parameters(agent_data, agents_df, agent_name):
+def coil_parameters(agent_data, agents_df, agent_full_name):
     """Sets pseudo random parameters"""
     rn = random()
     agent_data.at[0, 'int_fab'] = 0
     agent_data.at[0, 'location'] = agents_df.loc[0, 'Location']
     agent_data.at[0, 'to_do'] = 0
-    agent_data.loc[0, 'From'] = agents_df.loc[0, 'From']
-    agent_data.loc[0, 'Code'] = agents_df.loc[0, 'Code']
+    agent_data.at[0, 'From'] = agents_df.loc[0, 'From']
+    agent_data.at[0, 'Code'] = agents_df.loc[0, 'Code']
     agent_data.at[0, 'coil_length'] = 2000000 + (rn*2000000)  # between 2000 - 4000 m (2000000-4000000 mm)
     agent_data.at[0, 'coil_width'] = 900 + (rn*200)  # between 900 - 1100 mm
     agent_data.at[0, 'coil_thickness'] = 0.4 + (rn*0.5)  # between 0.4 - 0.9 mm
     agent_data.at[0, 'coil_weight'] = agent_data.at[0, 'coil_length'] * agent_data.at[0, 'coil_width'] * agent_data.at[0, 'coil_thickness'] * (1/1000) * (1/1000) *(7.85) #7.85 g/cm^3 is the density. Kg
-    agent_data.at[0,'parameter_F']= random.randint(10,79)
+    agent_data.at[0,'parameter_F']= randint(10,79)
     agent_data.at[0,'F_group'] = ''
     agent_data.at[0, 'setup_speed'] = 10 + (rn/2)  # between 10-10.5 m/s. Fab takes between 8 and 10 min with this conditions. process time = length / speed
     agent_data.at[0, 'ship_date'] = random_date(datetime.datetime.now(), datetime.datetime.now() + datetime.timedelta(minutes=40))  # Planning: between now and in 40 min.
@@ -201,14 +201,14 @@ def coil_parameters(agent_data, agents_df, agent_name):
     return agent_data
 
 def F_groups(parameter_F, nww_id):
-    if (nww_id == nww_01 or nww_id == nww_04):
+    if (nww_id == 'nww_01' or nww_id == 'nww_04'):
         group_1=['group_1',21,25,27,50,52,53]
         group_2=['group_2',20,24,51,57]
         group_3=['group_3',22,58]
         group_4=['group_4',28]
     else:
         group_1=['group_1',10,11,20,24,40,43,44,45,46,47,48,60,61,63,64,70]
-        group_2=['group_2',21,25,,27,41,42]
+        group_2=['group_2',21,25,27,41,42]
         group_3=['group_3',22]
         group_4=['group_4',28]
 
@@ -395,34 +395,34 @@ def br_jid(agent_directory):
 
 def estimate_tr_slot(br_data_df, fab_started_at, leeway, agent_df):
     """Returns a df with the the calculated time slots for which tr is requested"""
-        a = br_data_df.loc[0, 'AVG(nww_op_time)']
-        b = br_data_df.loc[0, 'AVG(tr_op_time)']
-        nww_estimated_end = fab_started_at + datetime.timedelta(minutes=int(br_data_df.loc[0, 'AVG(nww_op_time)']))  # time when on going fab started + mean nww processing time.
-        if br_data_df.loc[0, 'AVG(nww_op_time)'] == 9:
-            if br_data_df.loc[0, 'AVG(tr_op_time)'] == 3.5:
-                slot_1_start = nww_estimated_end - datetime.timedelta(minutes=int(br_data_df.loc[0, 'AVG(tr_op_time)'])) - (leeway / 2)
-                slot_1_end = nww_estimated_end + (leeway / 2)
+    a = br_data_df.loc[0, 'AVG(nww_op_time)']
+    b = br_data_df.loc[0, 'AVG(tr_op_time)']
+    nww_estimated_end = fab_started_at + datetime.timedelta(minutes=int(br_data_df.loc[0, 'AVG(nww_op_time)']))  # time when on going fab started + mean nww processing time.
+    if br_data_df.loc[0, 'AVG(nww_op_time)'] == 9:
+        if br_data_df.loc[0, 'AVG(tr_op_time)'] == 3.5:
+            slot_1_start = nww_estimated_end - datetime.timedelta(minutes=int(br_data_df.loc[0, 'AVG(tr_op_time)'])) - (leeway / 2)
+            slot_1_end = nww_estimated_end + (leeway / 2)
 
-        slot_1_start = nww_estimated_end - datetime.timedelta(minutes=int(br_data_df.loc[0, 'AVG(tr_op_time)'])) - (leeway / 2)
-        slot_1_end = nww_estimated_end + (leeway / 2)
-        slot_2_start = nww_estimated_end + datetime.timedelta(minutes=int(br_data_df.loc[0, 'AVG(nww_op_time)'])) - datetime.timedelta(minutes=int(br_data_df.loc[0, 'AVG(tr_op_time)']/2)) - (leeway / 2)
-        slot_2_end = nww_estimated_end + datetime.timedelta(minutes=int(br_data_df.loc[0, 'AVG(nww_op_time)'])) + datetime.timedelta(minutes=int(br_data_df.loc[0, 'AVG(tr_op_time)']/2)) + (leeway / 2)  # time when on going fab started + mean mww processing time + mean tr operation time
-        nww_to_tr_df = pd.DataFrame([], columns=['id', 'agent_type', 'location_1', 'location_2', 'location', 'purpose', 'request_type', 'action', 'time', 'slot_1_start', 'slot_1_end', 'slot_2_start', 'slot_2_end', 'slot'])
-        nww_to_tr_df.at[0, 'id'] = agent_df.loc[0, 'id']
-        nww_to_tr_df.at[0, 'agent_type'] = agent_df.loc[0, 'agent_type']
-        nww_to_tr_df.at[0, 'location_1'] = agent_df.loc[0, 'location_1']
-        nww_to_tr_df.at[0, 'location_2'] = agent_df.loc[0, 'location_2']
-        nww_to_tr_df.at[0, 'location'] = agent_df.loc[0, 'location']
-        nww_to_tr_df.at[0, 'purpose'] = "request"
-        nww_to_tr_df.at[0, 'slot_1_start'] = slot_1_start
-        nww_to_tr_df.at[0, 'slot_1_end'] = slot_1_end
-        nww_to_tr_df.at[0, 'slot_2_start'] = slot_2_start
-        nww_to_tr_df.at[0, 'slot_2_end'] = slot_2_end
-        this_time = datetime.datetime.now()
-        nww_to_tr_df.at[0, 'time'] = this_time
-        nww_to_tr_df.at[0, 'request_type'] = "request"
-        nww_to_tr_df.at[0, 'action'] = "pre-book"
-        return nww_to_tr_df
+    slot_1_start = nww_estimated_end - datetime.timedelta(minutes=int(br_data_df.loc[0, 'AVG(tr_op_time)'])) - (leeway / 2)
+    slot_1_end = nww_estimated_end + (leeway / 2)
+    slot_2_start = nww_estimated_end + datetime.timedelta(minutes=int(br_data_df.loc[0, 'AVG(nww_op_time)'])) - datetime.timedelta(minutes=int(br_data_df.loc[0, 'AVG(tr_op_time)']/2)) - (leeway / 2)
+    slot_2_end = nww_estimated_end + datetime.timedelta(minutes=int(br_data_df.loc[0, 'AVG(nww_op_time)'])) + datetime.timedelta(minutes=int(br_data_df.loc[0, 'AVG(tr_op_time)']/2)) + (leeway / 2)  # time when on going fab started + mean mww processing time + mean tr operation time
+    nww_to_tr_df = pd.DataFrame([], columns=['id', 'agent_type', 'location_1', 'location_2', 'location', 'purpose', 'request_type', 'action', 'time', 'slot_1_start', 'slot_1_end', 'slot_2_start', 'slot_2_end', 'slot'])
+    nww_to_tr_df.at[0, 'id'] = agent_df.loc[0, 'id']
+    nww_to_tr_df.at[0, 'agent_type'] = agent_df.loc[0, 'agent_type']
+    nww_to_tr_df.at[0, 'location_1'] = agent_df.loc[0, 'location_1']
+    nww_to_tr_df.at[0, 'location_2'] = agent_df.loc[0, 'location_2']
+    nww_to_tr_df.at[0, 'location'] = agent_df.loc[0, 'location']
+    nww_to_tr_df.at[0, 'purpose'] = "request"
+    nww_to_tr_df.at[0, 'slot_1_start'] = slot_1_start
+    nww_to_tr_df.at[0, 'slot_1_end'] = slot_1_end
+    nww_to_tr_df.at[0, 'slot_2_start'] = slot_2_start
+    nww_to_tr_df.at[0, 'slot_2_end'] = slot_2_end
+    this_time = datetime.datetime.now()
+    nww_to_tr_df.at[0, 'time'] = this_time
+    nww_to_tr_df.at[0, 'request_type'] = "request"
+    nww_to_tr_df.at[0, 'action'] = "pre-book"
+    return nww_to_tr_df
 
 
 
@@ -793,7 +793,7 @@ def coil_enter_auction_rating(auction_agent_df, agent_df, not_entered_auctions):
     width_difference=auction_agent_df.loc[0,'coil_width']-agent_df.loc[0,'coil_width']
 
     #Conditions NWW1 & NWW4
-    if (((auction_agent_df.loc[0, 'id'] == 'nww_1') and (agent_df.loc[0, 'location'] == 'F')) or ((auction_agent_df.loc[0, 'id'] == 'nww_4') and (agent_df.loc[0, 'location'] == 'I')):
+    if (((auction_agent_df.loc[0, 'id'] == 'nww_1') and (agent_df.loc[0, 'location'] == 'F')) or ((auction_agent_df.loc[0, 'id'] == 'nww_4') and (agent_df.loc[0, 'location'] == 'I'))):
         if ('CA' in agent_df[0,'From']):
             if (auction_agent_df.loc[0,'lot_size']>500000) or (auction_agent_df.loc[0,'F_group'] == agent_df.loc[0,'F_group']):
                 if (width_difference >= 0):
@@ -923,9 +923,8 @@ def coil_bid(nww_agent_df, coil_df, agent_status_var, coil_enter_auction_rating)
     print(f'loc_bid: {loc_bid}')
     print(f'auction_level_bid: {auction_level_bid}')
     print(f'int_fab_bid: {int_fab_bid}')
-    print(f'ship_date_bid: {ship_date_bid})
+    print(f'ship_date_bid: {ship_date_bid}')
     co_bid = int(auction_level_bid) + int(int_fab_bid) + int(ship_date_bid) + int(coil_rating)
-
 
     return co_bid
 
@@ -1160,18 +1159,18 @@ def compare_auctions(bid_register_df):
     return nww_agent_full_name
 
 #Temper rolling agent
-def nww_parameters(agent_data, agents_df, agent_name):
+def nww_parameters(agent_data, agents_df, agent_full_name):
     """Sets pseudo random parameters"""
     rn = random()
-    agent_data.at[0, 'location_1'] = agents_df.loc[0, 'Location1']
-    agent_data.at[0, 'location_2'] = agents_df.loc[0, 'Location2']
-    agent_data.at[0, 'location'] = agents_df.loc[0, 'Location']
+    agent_data.at[0, 'location_1'] = agents_df.at[0, 'Location1']
+    agent_data.at[0, 'location_2'] = agents_df.at[0, 'Location2']
+    agent_data.at[0, 'location'] = agents_df.at[0, 'Location']
     agent_data.at[0, 'coil_length'] = 2000000 + (rn*2000000)  # between 2000 - 4000 m (2000000-4000000 mm)
     agent_data.at[0, 'coil_width'] = 900+ (rn*200)  # between 900-1100 mm
     agent_data.at[0, 'coil_thickness'] = 0.4 + (rn*0.5)  # between 0.4-0.9 mm
     agent_data.at[0, 'coil_weight'] = agent_data.at[0, 'coil_length'] * agent_data.at[0, 'coil_width'] * agent_data.at[0, 'coil_thickness'] * (1/1000) * (1/1000) *(7.85) #7.85 g/cm^3 is the density. Kg
-    agent_data.at[0,'parameter_F']= random.randint(10,79)
-    agent_data.at[0,'F_group'] = Fgroups(agent_data.at[0,'parameter_F'], agent_data.at[0,'id'])
+    agent_data.at[0,'parameter_F']= randint(10,79)
+    agent_data.at[0,'F_group'] = F_groups(agent_data.at[0,'parameter_F'], agent_data.at[0,'id'])
     agent_data.at[0, 'setup_speed'] = 10 + (rn/2)  # between 10-10.5 m/s. Fab takes between 8 and 10 min with this conditions. process time = length / speed
     return agent_data
 
@@ -1183,7 +1182,6 @@ def nww_to_coils_initial_df(agent_df, nww_prev_coil, lot_size):
     agent_df.at[0, 'parameter_F'] = nww_prev_coil.loc[0, 'parameter_F']
     agent_df.at[0, 'F_group'] = nww_prev_coil.loc[0,'F_group']
     agent_df.at[0, 'lot_size'] = lot_size
-    agent_df.at[0, 'lot_number'] = nww_prev_coil.loc[0, 'lot_number']
     return agent_df
 
 def coste_transporte(to):
@@ -1202,7 +1200,7 @@ def nww_process_df(df, nww_counter_bid_df, nww_to_tr_df):
     process_df = df
     if pd.isnull(df['fab_start'].iloc[-1]):
         new_line_df = pd.Series([np.nan, np.nan, np.nan, np.nan, np.nan, np.nan, np.nan, np.nan, np.nan, np.nan, np.nan, np.nan],
-                                index=['fab_start', 'processing_time', 'start_auction_before', 'start_next_auction_at', 'fab_end', 'origin','parameter_F','F_group', 'lot_sizes', 'coil_width','cooling_time','lot_number'])
+                                index=['fab_start', 'processing_time', 'start_auction_before', 'start_next_auction_at', 'fab_end', 'origin','parameter_F','F_group', 'lot_sizes', 'coil_width','cooling_time'])
         process_df = df.append(new_line_df, ignore_index=True)
         process_df = process_df.reset_index(drop=True)
         print(f'process_df1: {process_df}')
@@ -1242,7 +1240,7 @@ def nww_process_df(df, nww_counter_bid_df, nww_to_tr_df):
 
 def nww_auction_bid_evaluation(coil_msgs_df, agent_df):
     """Evaluates coils and their bids and returns a df with an extra column with rating to coils proposal"""
-    ev_df = coil_msgs_df[['From','id', 'agent_type', 'location', 'int_fab', 'bid', 'bid_status', 'coil_length', 'coil_width', 'coil_thickness', 'coil_weight', 'setup_speed', 'origin','parameter_F','F_group','lot_sizes','cooling_time','lot_number']]
+    ev_df = coil_msgs_df[['From','id', 'agent_type', 'location', 'int_fab', 'bid', 'bid_status', 'coil_length', 'coil_width', 'coil_thickness', 'coil_weight', 'setup_speed', 'origin','parameter_F','F_group','lot_sizes','cooling_time']]
     ev_df = ev_df.reset_index(drop=True)
     # Transport evaluation. Extra column with transport cost
     key = []
@@ -1449,4 +1447,4 @@ def order_register(my_full_name, code, coils, locations):
     df.loc[0, 'code'] = code
     df.loc[0, 'coils'] = coils
     df.loc[0, 'locations'] = locations
-    return df.to_json(orient="records"
+    return df.to_json(orient="records")

@@ -341,9 +341,18 @@ class TemperRollingAgent(Agent):
                                     nww_msg_log = opf.msg_to_log(nww_msg_log_body, my_dir)
                                     await self.send(nww_msg_log)
                                     print(nww_msg_log_body)
-                            else:
-                                continue
-                            break
+
+                        else:
+                            """inform log of issue"""
+                            nww_msg_log_body = f'{my_full_name} received a msg from {msg_sender_jid} rather than {br_jid}'
+                            nww_msg_log = opf.msg_to_log(nww_msg_log_body, my_dir)
+                            await self.send(nww_msg_log)
+                            print(nww_msg_log_body)
+                    else:
+                        """inform log"""
+                        coil_msg_log_body = f'{my_full_name} did not receive any msg in the last {wait_msg_time}s at {nww_status_var}'
+                        coil_msg_log = opf.msg_to_log(coil_msg_log_body, my_dir)
+                        await self.send(coil_msg_log)
 
                 else:
                     """inform log of issue"""
@@ -678,13 +687,13 @@ async def setup(self):
 if __name__ == "__main__":
     """Parser parameters"""
     parser = argparse.ArgumentParser(description='wh parser')
-    parser.add_argument('-an', '--agent_number', type=int, metavar='', required=False, default=12, help='agent_number: 1,3,4')
+    parser.add_argument('-an', '--agent_number', type=int, metavar='', required=False, default=1, help='agent_number: 1,3,4')
     parser.add_argument('-w', '--wait_msg_time', type=int, metavar='', required=False, default=20, help='wait_msg_time: time in seconds to wait for a msg')
     parser.add_argument('-st', '--stop_time', type=int, metavar='', required=False, default=84600, help='stop_time: time in seconds where agent')
     parser.add_argument('-s', '--status', type=str, metavar='', required=False, default='stand-by', help='status_var: on, stand-by, Off')
     parser.add_argument('-sab', '--start_auction_before', type=int, metavar='', required=False, default=10, help='start_auction_before: seconds to start auction prior to current fab ends')
     parser.add_argument('-tc', '--transport_agent', type=str, metavar='', required=False, default='no', help='transport_agent: yes, no')
-    parser.add_argument('-wh', '--warehouse_agent', type=str, metavar='', required=False, default='no', help='transport_agent: yes, no')
+    parser.add_argument('-wh', '--warehouse_agent', type=str, metavar='', required=False, default='no', help='wharehouse_agent: yes, no')
 
     args = parser.parse_args()
     my_dir = os.getcwd()
@@ -700,7 +709,7 @@ if __name__ == "__main__":
     """Save to csv who I am"""
     opf.set_agent_parameters(my_dir, my_name, my_full_name)
     nww_data_df = pd.read_csv(f'{my_full_name}.csv', header=0, delimiter=",", engine='python')
-    nww_prev_coil_df = nww_data_df[['coil_length','coil_width','coil_thickness','coil_weight','parameter_F', 'F_group','lot_size','lot_number']]
+    nww_prev_coil_df = nww_data_df[['coil_length','coil_width','coil_thickness','coil_weight','parameter_F', 'F_group','lot_size']]
     auction_df = opf.auction_blank_df()
     process_df = pd.DataFrame([], columns=['fab_start', 'processing_time', 'start_auction_before', 'start_next_auction_at', 'fab_end', 'From','parameter_F','F_group', 'lot_size', 'coil_width','cooling_time','lot_number'])
     process_df.at[0, 'start_next_auction_at'] = datetime.datetime.now() + datetime.timedelta(seconds=start_auction_before)

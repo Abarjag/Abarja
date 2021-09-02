@@ -20,12 +20,12 @@ class TransportAgent(Agent):
             """inform log of status"""
             tr_activation_json = opf.activation_df(my_full_name, tr_status_started_at)
             tr_msg_log = opf.msg_to_log(tr_activation_json, my_dir)
-            await self.send(wh_msg_log)
+            await self.send(tr_msg_log)
             if tr_status_var == "on":
                 """inform log of status"""
                 tr_inform_json = opf.inform_log_df(my_full_name, tr_status_started_at, tr_status_var).to_json()
                 tr_msg_log = opf.msg_to_log(tr_inform_json, my_dir)
-                await self.send(wh_msg_log)
+                await self.send(tr_msg_log)
                 nww_tr_msg = await self.receive(timeout=wait_msg_time)  # wait for a message for 5 seconds
                 if nww_tr_msg:
                     nww_data_df = pd.read_json(nww_tr_msg.body)
@@ -95,7 +95,7 @@ class TransportAgent(Agent):
 
 if __name__ == "__main__":
     """Parser parameters"""
-    parser = argparse.ArgumentParser(description='wh parser')
+    parser = argparse.ArgumentParser(description='tc parser')
     parser.add_argument('-an', '--agent_number', type=int, metavar='', required=False, default=1, help='agent_number: 1,2,3,4..')
     parser.add_argument('-w', '--wait_msg_time', type=int, metavar='', required=False, default=20, help='wait_msg_time: time in seconds to wait for a msg')
     parser.add_argument('-st', '--stop_time', type=int, metavar='', required=False, default=84600, help='stop_time: time in seconds where agent')
