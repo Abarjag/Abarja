@@ -31,6 +31,8 @@ class LogAgent(Agent):
                     msg_sender_jid1 = msg_sender_jid0[:-33]
                     if msg_sender_jid1 == 'c0':
                         msg_sender_jid2 = 'coil'
+                    elif msg_sender_jid1 == 'va':
+                        msg_sender_jid2 = 'va'
                     elif msg_sender_jid1 == 'nww':
                         msg_sender_jid2 = 'nww'
                     else:
