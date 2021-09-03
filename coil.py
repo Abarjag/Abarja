@@ -319,11 +319,17 @@ class CoilAgent(Agent):
 if __name__ == "__main__":
     """Parser parameters"""
     parser = argparse.ArgumentParser(description='coil parser')
-    parser.add_argument('-an', '--agent_number', type=int, metavar='', required=False, default=1, help='agent_number: 1,2,3,4..')
-    parser.add_argument('-w', '--wait_msg_time', type=int, metavar='', required=False, default=20, help='wait_msg_time: time in seconds to wait for a msg')
+    parser.add_argument('-an', '--agent_number', type=int, metavar='', required=False, default=3, help='agent_number: 1,2,3,4..')
+    parser.add_argument('-v', '--wait_msg_time', type=int, metavar='', required=False, default=20, help='wait_msg_time: time in seconds to wait for a msg')
+    parser.add_argument('-w', '--wait_auction_time', type=int, metavar='', required=False, default=500,
+                        help='wait_msg_time: time in seconds to wait for a msg')
     parser.add_argument('-st', '--stop_time', type=int, metavar='', required=False, default=84600, help='stop_time: time in seconds where agent')
     parser.add_argument('-s', '--status', type=str, metavar='', required=False, default='stand-by', help='status_var: on, stand-by, off')
-    parser.add_argument('-b', '--budget', type=int, metavar='', required=False, default=20000, help='budget: in case of needed, budget can be increased')
+    parser.add_argument('-b', '--budget', type=int, metavar='', required=False, default=200, help='budget: in case of needed, budget can be increased')
+    parser.add_argument('-l', '--location', type=str, metavar='', required=False, default='K',
+                        help='location: K')
+    parser.add_argument('-c', '--code', type=str, metavar='', required=False, default='cO202106101',
+                        help='code: cO202106101')
     args = parser.parse_args()
     my_dir = os.getcwd()
     my_name = os.path.basename(__file__)[:-3]
