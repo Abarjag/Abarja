@@ -1,7 +1,7 @@
 import pandas as pd
 import os
 import datetime
-from datetime import timedelta
+from datetime import timedelta, date
 from random import randrange
 from random import random
 from random import randint
