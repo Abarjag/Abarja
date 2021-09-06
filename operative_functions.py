@@ -158,7 +158,8 @@ def set_agent_parameters(agent_directory, agent_name, agent_full_name):
         df = agents_df.loc[agents_df['Name'] == agent_full_name]
         df = df.reset_index(drop=True)
         agent_data.at[0, 'location'] = df.at[0, 'Location']
-    agent_data.to_csv(f'{agent_directory}''/'f'{agent_full_name}.csv', index=False, header=True)
+
+    return agent_data
 
 
 """Agent-specific Functions"""

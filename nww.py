@@ -707,8 +707,7 @@ if __name__ == "__main__":
     transport_needed= args.transport_agent
     warehouse_needed=args.warehouse_agent
     """Save to csv who I am"""
-    opf.set_agent_parameters(my_dir, my_name, my_full_name)
-    nww_data_df = pd.read_csv(f'{my_full_name}.csv', header=0, delimiter=",", engine='python')
+    nww_data_df= opf.set_agent_parameters(my_dir, my_name, my_full_name)
     nww_prev_coil_df = nww_data_df[['coil_length','coil_width','coil_thickness','coil_weight','parameter_F', 'F_group','lot_size']]
     auction_df = opf.auction_blank_df()
     process_df = pd.DataFrame([], columns=['fab_start', 'processing_time', 'start_auction_before', 'start_next_auction_at', 'fab_end', 'From','parameter_F','F_group', 'lot_size', 'coil_width','cooling_time','lot_number'])

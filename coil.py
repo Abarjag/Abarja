@@ -339,8 +339,7 @@ if __name__ == "__main__":
     coil_status_var = args.status
     refresh_time = datetime.datetime.now() + datetime.timedelta(seconds=1)
     """Save to csv who I am"""
-    opf.set_agent_parameters(my_dir, my_name, my_full_name)
-    coil_data_df = pd.read_csv(f'{my_full_name}.csv', header=0, delimiter=",", engine='python')
+    coil_data_df = opf.set_agent_parameters(my_dir, my_name, my_full_name)
     coil_data_df.at[0, 'budget'] = args.budget
     budget = coil_data_df.loc[0, 'budget']
     print(f'budget:{budget}')

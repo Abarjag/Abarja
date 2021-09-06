@@ -110,7 +110,7 @@ if __name__ == "__main__":
     wh_status_refresh = datetime.datetime.now() + datetime.timedelta(seconds=5)
     wh_status_var = args.status
     """Save to csv who I am"""
-    opf.set_agent_parameters(my_dir, my_name, my_full_name)
+    wh_data = opf.set_agent_parameters(my_dir, my_name, my_full_name)
     #opf.wh_create_register(my_dir, my_full_name)  # register to store entrance and exit
     """XMPP info"""
     wh_jid = opf.agent_jid(my_dir, my_full_name)
