@@ -460,7 +460,6 @@ def locations_min_distances():
     agent_locations_dist_df = pd.DataFrame(data=d)
     return agent_locations_dist_df
 
-
 def get_tr_list(slot, br_data_df, agent_full_name, agent_directory):
     """Returns a df containing name, location and jid_name (User_name) of active tr agents"""
     agent_df = pd.read_csv(f'{agent_full_name}.csv', header=0, delimiter=",", engine='python')
@@ -1453,3 +1452,25 @@ def order_register(my_full_name, code, coils, locations):
     df.loc[0, 'coils'] = coils
     df.loc[0, 'locations'] = locations
     return df.to_json(orient="records")
+
+
+
+'''Functions to improve readability in messages. Improve functions'''
+def answer_nww(df_br, sender, df_nww, coils, location):
+    df = pd.DataFrame()
+    df.loc[0, 'msg'] = df_nww.loc[0, 'seq']
+    df.loc[0, "id"] = 'browser'
+    df.loc[0, "coils"] = coils
+    df.loc[0, "location"] = location
+    df.loc[0, "purpose"] = 'answer'
+    df.loc[0, "to"] = sender
+    df = df[['id', 'purpose', 'msg', 'coils', 'location', 'to']]
+    return df
+
+def answer_coil(df, sender, seq_df):
+    df.loc[0, 'msg'] = seq_df.loc[0, 'msg']
+    df.loc[0, "id"] = 'browser'
+    df.loc[0, "purpose"] = 'answer'
+    df.loc[0, "to"] = sender
+    df = df[['id', 'purpose', 'msg','location', 'to']]
+    return df
