@@ -23,7 +23,7 @@ class WarehouseAgent(Agent):
             await self.send(wh_msg_log)
             if wh_status_var == "on":
                 """inform log of status"""
-                wh_inform_json = opf.inform_log_df(my_full_name, wh_status_started_at, wh_status_var).to_json()
+                wh_inform_json = opf.inform_log_df(my_full_name,'wh', wh_status_started_at, wh_status_var).to_json()
                 wh_msg_log = opf.msg_to_log(wh_inform_json, my_dir)
                 await self.send(wh_msg_log)
                 nww_wh_msg = await self.receive(timeout=wait_msg_time)  # wait for a message for 5 seconds
@@ -64,19 +64,19 @@ class WarehouseAgent(Agent):
                     await self.send(coil_msg_log)
             elif wh_status_var == "stand-by":  # stand-by status for WH is not very useful, just in case we need the agent to be alive, but not operative. At the moment, it won´t change to stand-by.
                 """inform log of status"""
-                wh_inform_json = opf.inform_log_df(my_full_name, wh_status_started_at, wh_status_var).to_json()
+                wh_inform_json = opf.inform_log_df(my_full_name,'wh', wh_status_started_at, wh_status_var).to_json()
                 wh_msg_log = opf.msg_to_log(wh_inform_json, my_dir)
                 await self.send(wh_msg_log)
                 # We could introduce here a condition to be met to change to "on"
                 # now it just changes directly to auction
                 """inform log of status"""
                 wh_status_var = "on"
-                wh_inform_json = opf.inform_log_df(my_full_name, wh_status_started_at, wh_status_var).to_json()
+                wh_inform_json = opf.inform_log_df(my_full_name,'wh', wh_status_started_at, wh_status_var).to_json()
                 wh_msg_log = opf.msg_to_log(wh_inform_json, my_dir)
                 await self.send(wh_msg_log)
             else:
                 """inform log of status"""
-                wh_inform_json = opf.inform_log_df(my_full_name, wh_status_started_at, wh_status_var).to_json()
+                wh_inform_json = opf.inform_log_df(my_full_name,'wh', wh_status_started_at, wh_status_var).to_json()
                 wh_msg_log = opf.msg_to_log(wh_inform_json, my_dir)
                 await self.send(wh_msg_log)
                 wh_status_var = "stand-by"
@@ -106,11 +106,11 @@ if __name__ == "__main__":
     my_name = os.path.basename(__file__)[:-3]
     my_full_name = opf.my_full_name(my_name, args.agent_number)
     wait_msg_time = args.wait_msg_time
-    wh_status_started_at = datetime.datetime.now().time()
+    wh_status_started_at = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     wh_status_refresh = datetime.datetime.now() + datetime.timedelta(seconds=5)
     wh_status_var = args.status
     """Save to csv who I am"""
-    wh_data = opf.set_agent_parameters(my_dir, my_name, my_full_name)
+    opf.set_agent_parameters(my_dir, my_name, my_full_name,0,0,0,'','','')
     #opf.wh_create_register(my_dir, my_full_name)  # register to store entrance and exit
     """XMPP info"""
     wh_jid = opf.agent_jid(my_dir, my_full_name)

@@ -1,688 +1,763 @@
+import time, datetime, sys, os, argparse,json, re
+import socket, globals, random, pdb
+import pandas as pd
+import numpy as np
+import math
+import operative_functions as asf
 from spade import quit_spade
-import time
-import datetime
 from spade.agent import Agent
 from spade.behaviour import CyclicBehaviour, PeriodicBehaviour
 from spade.template import Template
 from spade.message import Message
-import sys
-import pandas as pd
-import logging
-import argparse
-import operative_functions as opf
-import os
+
+global va_msg_log, auction_start, pre_auction_start
 
 class TemperRollingAgent(Agent):
-    class NWWBehav(PeriodicBehaviour):
+    class NWWBehav(CyclicBehaviour):
         async def run(self):
-            global process_df, nww_status_var, my_full_name, nww_status_started_at, stop_time, my_dir, wait_msg_time, nww_data_df, nww_prev_coil_df, lot_size, dim_df, auction_df, fab_started_at, leeway, op_times_df, auction_start, nww_to_tr_df, transport_needed, warehouse_needed
-            "inform log of status"
-            print(f'op_times_df: {op_times_df}')
-            nww_activation_json = opf.activation_df(my_full_name, nww_status_started_at, op_times_df)
-            nww_msg_log = opf.msg_to_log(nww_activation_json, my_dir)
-            await self.send(nww_msg_log)
+            global process_df, nww_status_var, my_full_name, nww_status_started_at, \
+                   stop_time, my_dir, wait_msg_time, nww_data_df, nww_prev_coil_df, \
+                   lot_size, auction_df, fab_started_at, leeway, op_times_df, \
+                   auction_start, nww_to_tr_df, transport_needed, warehouse_needed, seq_nww, \
+                   results_2, coil_msgs_df, medias_list, ip_machine, number, \
+                   list_stg_coils, nww_msg_log, pre_auction_start, pending_au, \
+                   coil_msgs_df2,coil_msgs_df3,post_auction_step, coil_notified, \
+                   rep_pauction, all_auctions
+            #
             if nww_status_var == "pre-auction":
-                pre_auction_start = datetime.datetime.now()
-                auction_df.at[0, 'pre_auction_start'] = pre_auction_start  # save to auction df
-                print(f'pre_auction_start: {pre_auction_start}')
-                """inform log of status"""
-                nww_inform_json = opf.inform_log_df(my_full_name, nww_status_started_at, nww_status_var).to_json()
-                nww_msg_log = opf.msg_to_log(nww_inform_json, my_dir)
-                await self.send(nww_msg_log)
-                if transport_needed == 'yes':
-                    """Asks browser agent for nww_op_time and tr_op_time and locations of agents"""
-                    #  Builds msg to br
-                    nww_msg_br_body = opf.req_active_users_loc_times(nww_data_df)  # returns a json with request info to browser
-                    nww_msg_br = opf.msg_to_br(nww_msg_br_body, my_dir)  # returns a msg object with request info to browser and message setup
-                    await self.send(nww_msg_br)
-                    br_msg = await self.receive(timeout=wait_msg_time)
-                    if br_msg:
-                        br_data_df = pd.read_json(br_msg.body)
-                        br_jid = opf.br_jid(my_dir)
-                        msg_sender_jid = str(br_msg.sender)
-                        msg_sender_jid = msg_sender_jid[:-9]
-                        if msg_sender_jid == br_jid:  # nww may receive many msgs from different agents, at this point only msg´s from br enables to continue.
-                            auction_df.at[0, 'brAVG(tr_op_time)'] = br_data_df.loc[0, 'AVG(tr_op_time)']  # save to auction df
-                            auction_df.at[0, 'brAVG(nww_op_time)'] = br_data_df.loc[0, 'AVG(nww_op_time)']  # save to auction df
-                            """Estimation of when NWW needs TR"""
-                            nww_to_tr_df = opf.estimate_tr_slot(br_data_df, fab_started_at, leeway, nww_data_df)
-                            """Get a df with the closest active TR to iterate to request prebook for slot 1"""
-                            slot = 1
-                            nww_to_tr_df.at[0, 'slot'] = slot
-                            nww_to_tr_json = nww_to_tr_df.to_json()  # json to send to tr with slots to prebook
-                            #print(f'br_data_df: {br_data_df}')
-                            closest_tr_df = opf.get_tr_list(slot, br_data_df, my_full_name, my_dir)
-                            # Create a loop to ask for availability. First loop: message to closest tr, receive answer and if available break and pre-book done. If not available, send message to next available tr.
-                            jid_list = closest_tr_df['User name'].tolist()
-                            auction_df.at[0, 'active_tr_slot_1'] = [closest_tr_df.to_dict()]  # save to auction df
-                            nww_msg_to_tr = opf.nww_msg_to(nww_to_tr_json)
-                            tr_occupied = []
-                            tr_assigned = []
-                            # var1, var2 = tr_assigned
-                            for i in jid_list:
-                                nww_msg_to_tr.to = i
-                                await self.send(nww_msg_to_tr)
-                                tr_msg = await self.receive(timeout=wait_msg_time)
-                                if tr_msg:
-                                    msg_sender_jid = str(tr_msg.sender)
-                                    msg_sender_jid = msg_sender_jid[:-9]
-                                    if msg_sender_jid == i:
-                                        if format(tr_msg.body) == "negative":
-                                            tr_occupied.append(i)
-                                            continue
-                                        elif format(tr_msg.body) == "positive":
-                                            tr_assigned.append(i)
-                                            print("slot_1 assigned")
-                                            name_tr_slot_1 = opf.get_agent_name(msg_sender_jid, my_dir)
-                                            auction_df.at[0, 'name_tr_slot_1'] = name_tr_slot_1  # save to auction df
-                                            auction_df.at[0, 'handling_cost_slot_1'] = opf.handling_cost(nww_to_tr_df, slot)  # save to auction df
-                                            auction_df.at[0, 'slot_1_start'] = nww_to_tr_df.loc[0, 'slot_1_start']
-                                            auction_df.at[0, 'slot_1_end'] = nww_to_tr_df.loc[0, 'slot_1_end']
-                                            """Get a df with the closest active TR to iterate to request prebook for slot 2"""
-                                            slot = 2
-                                            nww_to_tr_df.at[0, 'slot'] = slot
-                                            nww_to_tr_json = nww_to_tr_df.to_json()  # json to send to tr with slots to prebook
-                                            closest_tr_df = opf.get_tr_list(slot, br_data_df, my_full_name, my_dir)
-                                            auction_df.at[0, 'active_tr_slot_2'] = [closest_tr_df.to_dict()]  # save to auction dfdelivered_to_wh
-                                            # Create a loop to ask for availability. First loop: message to closest tr, receive answer and if available break and pre-book done. If not available, send message to next available tr.
-                                            jid_list = closest_tr_df['User name'].tolist()
-                                            nww_msg_to_tr = opf.nww_msg_to(nww_to_tr_json)
-                                            for z in jid_list:
-                                                nww_msg_to_tr.to = z
-                                                await self.send(nww_msg_to_tr)
-                                                tr_msg = await self.receive(timeout=wait_msg_time)
-                                                if tr_msg:
-                                                    msg_sender_jid = str(tr_msg.sender)
-                                                    msg_sender_jid = msg_sender_jid[:-9]
-                                                    if msg_sender_jid == i:
-                                                        if format(tr_msg.body) == "negative":
-                                                            tr_occupied.append(z)
-                                                            continue
-                                                        elif format(tr_msg.body) == "positive":
-                                                            tr_assigned.append(z)
-                                                            print("slot_2 assigned")
-                                                            name_tr_slot_2 = opf.get_agent_name(msg_sender_jid, my_dir)
-                                                            auction_df.at[0, 'name_tr_slot_2'] = name_tr_slot_2  # save to auction df
-                                                            auction_df.at[0, 'handling_cost_slot_2'] = opf.handling_cost(nww_to_tr_df, slot)  # save to auction df
-                                                            auction_df.at[0, 'slot_2_start'] = nww_to_tr_df.loc[0, 'slot_2_start']
-                                                            auction_df.at[0, 'slot_2_end'] = nww_to_tr_df.loc[0, 'slot_2_end']
-                                                            """Confirm bookings to slot_1 and slot_2 transports"""
-                                                            l = 0
-                                                            nww_to_tr_df.at[0, 'action'] = "booked"
-                                                            for w in tr_assigned:
-                                                                l = l + 1
-                                                                if l == 1:
-                                                                    nww_to_tr_df.at[0, 'slot'] = 1
-                                                                    nww_to_tr_json = nww_to_tr_df.to_json()
-                                                                    nww_msg_tr_conf = opf.nww_msg_to(nww_to_tr_json)
-                                                                    nww_msg_tr_conf.to = w
-                                                                    await self.send(nww_msg_tr_conf)
-                                                                elif l == 2:
-                                                                    nww_to_tr_df.at[0, 'slot'] = 2
-                                                                    nww_to_tr_json = nww_to_tr_df.to_json()
-                                                                    nww_msg_tr_conf = opf.nww_msg_to(nww_to_tr_json)
-                                                                    nww_msg_tr_conf.to = w
-                                                                    await self.send(nww_msg_tr_conf)
-                                                                else:
-                                                                    """inform log"""
-                                                                    nww_msg_log_body = f'Error at {my_full_name}: did not confirm booking to tr agents'
-                                                                    nww_msg_log = opf.msg_to_log(nww_msg_log_body, my_dir)
-                                                                    await self.send(nww_msg_log)
-                                                            """inform log of tr bookings"""
-                                                            nww_msg_log_json = opf.confirm_tr_bookings_to_log(nww_to_tr_df, my_full_name, closest_tr_df, tr_assigned)
-                                                            nww_msg_log = opf.msg_to_log(nww_msg_log_json, my_dir)
-                                                            await self.send(nww_msg_log)
-                                                            auction_df.at[0, 'tr_booking_confirmation_at'] = datetime.datetime.now()  # save to auction df
+                diff=(datetime.datetime.now()-pre_auction_start).total_seconds()
+                # print(' Preauction: ' + str(self.act_qry('ask-coils','pre-auction')) +\
+                #                             ' Sncds:'+ str(diff))
+                rep_pauction = 0 # Tolerance of 5 to repetition in auctions.
+                if self.act_qry('ask-coils','pre-auction') == 0 and diff > 25:
+                    seq_nww = seq_nww + 1
+                    auction_df.at[0, 'pre_auction_start'] = pre_auction_start
+                    """Asks browser for active coils and locations"""
+                    pre_auction_start = datetime.datetime.now()
+                    [id_org,cl_agent] = await self.ask_coils()
+                    curr = datetime.datetime.now()
+                    globals.tosend.append({'idorg':id_org,'agnt_org': \
+                                globals.gnww_jid,'act':'ask-coils',\
+                                'agnt_dst':globals.gbrw_jid,'dt':curr,\
+                                'st':'pre-auction'})
+                #
+                """ Process the messages """
+                msg_ag = await self.receive(timeout=wait_msg_time)
+                if msg_ag:
 
-                                                            if warehouse_needed == 'yes':
-                                                                """ask wh for space to store coil after fab"""
-                                                                closest_wh_df = opf.get_wh_list(br_data_df, my_full_name, my_dir)
-                                                                jid_list = closest_wh_df['User name'].tolist()
-                                                                auction_df.at[0, 'active_wh'] = [closest_wh_df.to_dict()]  # save to auction df
-                                                                nww_to_wh_df = opf.estimate_tr_slot(br_data_df, fab_started_at, leeway, nww_data_df)  # Recalculates as it has been modified
-                                                                slot = 2
-                                                                nww_to_wh_df.at[0, 'slot'] = slot
-                                                                nww_to_wh_df.at[0, 'action'] = "book"
-                                                                nww_to_wh_json = nww_to_wh_df.to_json()
-                                                                nww_msg_to_wh = opf.nww_msg_to(nww_to_wh_json)
-                                                                wh_occupied = []
-                                                                wh_assigned = []
-                                                                # var1, var2 = wh_assigned
-                                                                for i in jid_list:
-                                                                    nww_msg_to_wh.to = i
-                                                                    await self.send(nww_msg_to_wh)
-                                                                    wh_msg = await self.receive(timeout=wait_msg_time)
-                                                                    if wh_msg:
-                                                                        msg_sender_jid = str(wh_msg.sender)
-                                                                        msg_sender_jid = msg_sender_jid[:-9]
-                                                                        if msg_sender_jid == i:
-                                                                            if format(wh_msg.body) == "negative":
-                                                                                wh_occupied.append(i)
-                                                                                continue
-                                                                            elif format(wh_msg.body) == "positive":
-                                                                                wh_assigned.append(i)
-                                                                                print("wh assigned")
-                                                                                delivered_to_wh = opf.get_agent_name(msg_sender_jid, my_dir)
-                                                                                auction_df.at[0, 'delivered_to_wh'] = delivered_to_wh  # save to auction df
-                                                                                auction_df.at[0, 'wh_location'] = opf.get_agent_location(delivered_to_wh)
-                                                                                """inform log of wh booking"""
-                                                                                nww_msg_log_json = opf.confirm_wh_booking_to_log(nww_to_wh_df, wh_assigned, my_dir, closest_wh_df)
-                                                                                nww_msg_log = opf.msg_to_log(nww_msg_log_json, my_dir)
-                                                                                await self.send(nww_msg_log)
-                                                                                auction_df.at[0, 'wh_booking_confirmation_at'] = datetime.datetime.now()  # Save information to auction df
-                                                                                """change of status"""
-                                                                                nww_status_var = "auction"  # Status change to auction in which negotiation with coil takes place
-                                                                                """inform log of change of status"""
-                                                                                nww_inform_json = opf.inform_log_df(my_full_name, nww_status_started_at, nww_status_var).to_json()
-                                                                                nww_msg_log = opf.msg_to_log(nww_inform_json, my_dir)
-                                                                                await self.send(nww_msg_log)
-                                                                                auction_start = datetime.datetime.now()
-                                                                                break
-                                                                            else:
-                                                                                print(f'{wh_msg.sender} did not set a correct msg.body: {wh_msg.body} in communication with {my_full_name}')
-                                                                                """inform log of issue"""
-                                                                                nww_msg_log_body = f'{wh_msg.sender} did not set a correct msg.body: {wh_msg.body} in communication with {my_full_name}'
-                                                                                nww_msg_log = opf.msg_to_log(nww_msg_log_body, my_dir)
-                                                                                await self.send(nww_msg_log)
-                                                                                print(nww_msg_log_body)
-                                                                        else:
-                                                                            """inform log of issue"""
-                                                                            nww_msg_log_body = f'{my_full_name} received a msg from {msg_sender_jid} rather than {br_jid}'
-                                                                            nww_msg_log = opf.msg_to_log(nww_msg_log_body, my_dir)
-                                                                            await self.send(nww_msg_log)
-                                                                            print(nww_msg_log_body)
-                                                                    else:
-                                                                        """inform log of issue"""
-                                                                        nww_msg_log_body = f'{my_full_name} did not receive answer from {i} to book wh'
-                                                                        nww_msg_log = opf.msg_to_log(nww_msg_log_body, my_dir)
-                                                                        await self.send(nww_msg_log)
-                                                                        print(nww_msg_log_body)
-                                                                else:
-                                                                    continue
-                                                                break
+                    recl = re.match(r'^c\d+',str(msg_ag.sender))
+                    # print(globals.ret_dact)
+                    if 'BROW' in str(msg_ag.sender).upper():
+                        cl_df = pd.read_json(msg_ag.body)
+                        seqce = cl_df.loc[0,'seq']
+                        [act,st] = self.ret_agnt(seqce)
+                        if st == 'pre-auction' and act == 'ask-coils':
+                            dact  = pd.read_json(cl_df.loc[0,'msg'])
+                            glist = self.del_agnt(seqce,globals.tosend)
+                            globals.tosend = glist
+                            br_data_df = []
+                            myfnam = (my_full_name.split('@')[0]).upper()
+                            myfnam = myfnam[:-3]
+                            for k in dact.index:
+                                res = re.match(dact.loc[k,'ph'],myfnam)
+                                if res:
+                                    if res.group(0) == myfnam:
+                                        br_data_df.append(dact.loc[k,'id'])
+                            #
+                            if len(br_data_df) > 0: # There are coils waiting ...
 
-                                                            else:
-                                                                """inform log of issue"""
-                                                                nww_msg_log_body = f'Warehouse booking is not required, auction starts'
-                                                                nww_msg_log = opf.msg_to_log(nww_msg_log_body, my_dir)
-                                                                await self.send(nww_msg_log)
-                                                                print(nww_msg_log_body)
-                                                                """change of status"""
-                                                                nww_status_var = "auction"  # Status change to auction in which negotiation with coil takes place
-                                                                """inform log of change of status"""
-                                                                nww_inform_json = opf.inform_log_df(my_full_name, nww_status_started_at, nww_status_var).to_json()
-                                                                nww_msg_log = opf.msg_to_log(nww_inform_json, my_dir)
-                                                                await self.send(nww_msg_log)
-                                                                auction_start = datetime.datetime.now()
-
-                                                        else:
-                                                            """inform log of issue"""
-                                                            nww_msg_log_body = f'{tr_msg.sender} did not set a correct msg.body: {tr_msg.body} in communication with {my_full_name} for slot_2'
-                                                            nww_msg_log = opf.msg_to_log(nww_msg_log_body, my_dir)
-                                                            await self.send(nww_msg_log)
-                                                            print(nww_msg_log_body)
-                                                    else:
-                                                        """inform log of issue"""
-                                                        nww_msg_log_body = f'{my_full_name} received a msg from {msg_sender_jid} rather than {br_jid}'
-                                                        nww_msg_log = opf.msg_to_log(nww_msg_log_body, my_dir)
-                                                        await self.send(nww_msg_log)
-                                                        print(nww_msg_log_body)
-                                                else:
-                                                    """inform log of issue"""
-                                                    nww_msg_log_body = f'{my_full_name} didn´t receive reply from {z} for slot_2'
-                                                    nww_msg_log = opf.msg_to_log(nww_msg_log_body, my_dir)
-                                                    await self.send(nww_msg_log)
-                                                    print(nww_msg_log_body)
-                                            else:
-                                                continue
-                                            break
-                                        else:
-                                            """inform log of issue"""
-                                            nww_msg_log_body = f'{tr_msg.sender} did not set a correct msg.body: {tr_msg.body} in communication with {my_full_name} for slot_1'
-                                            nww_msg_log = opf.msg_to_log(nww_msg_log_body, my_dir)
-                                            await self.send(nww_msg_log)
-                                            print(nww_msg_log_body)
-                                    else:
-                                        """inform log of issue"""
-                                        nww_msg_log_body = f'{my_full_name} received a msg from {msg_sender_jid} rather than {br_jid}'
-                                        nww_msg_log = opf.msg_to_log(nww_msg_log_body, my_dir)
-                                        await self.send(nww_msg_log)
-                                        print(nww_msg_log_body)
-                                else:
-                                    nww_msg_log_body = f'{my_full_name} did not receive answer from {i} for slot_1'
-                                    nww_msg_log = opf.msg_to_log(nww_msg_log_body, my_dir)
-                                    await self.send(nww_msg_log)
-                                    print(nww_msg_log_body)
-                        else:
-                            """inform log of issue"""
-                            nww_msg_log_body = f'{my_full_name} received a msg from {msg_sender_jid} rather than {br_jid}'
-                            nww_msg_log = opf.msg_to_log(nww_msg_log_body, my_dir)
-                            await self.send(nww_msg_log)
-                            print(nww_msg_log_body)
-                    else:
-                        """inform log"""
-                        coil_msg_log_body = f'{my_full_name} did not receive any msg in the last {wait_msg_time}s at {nww_status_var}'
-                        coil_msg_log = opf.msg_to_log(coil_msg_log_body, my_dir)
-                        await self.send(coil_msg_log)
-
-                elif warehouse_needed == 'yes':
-                    """Asks browser agent for nww_op_time and tr_op_time and locations of agents"""
-                    #  Builds msg to br
-                    nww_msg_br_body = opf.req_active_users_loc_times(nww_data_df)  # returns a json with request info to browser
-                    nww_msg_br = opf.msg_to_br(nww_msg_br_body, my_dir)  # returns a msg object with request info to browser and message setup
-                    await self.send(nww_msg_br)
-                    br_msg = await self.receive(timeout=wait_msg_time)
-                    if br_msg:
-                        br_data_df = pd.read_json(br_msg.body)
-                        br_jid = opf.br_jid(my_dir)
-                        msg_sender_jid = str(br_msg.sender)
-                        msg_sender_jid = msg_sender_jid[:-9]
-                        if msg_sender_jid == br_jid:  # nww may receive many msgs from different agents, at this point only msg´s from br enables to continue.
-                            auction_df.at[0, 'brAVG(nww_op_time)'] = br_data_df.loc[0, 'AVG(nww_op_time)']  # save to auction df
-                            """ask wh for space to store coil after fab"""
-                            closest_wh_df = opf.get_wh_list(br_data_df, my_full_name, my_dir)
-                            jid_list = closest_wh_df['User name'].tolist()
-                            auction_df.at[0, 'active_wh'] = [closest_wh_df.to_dict()]  # save to auction df
-                            nww_to_wh_df = opf.estimate_tr_slot(br_data_df, fab_started_at, leeway, nww_data_df)
-                            slot = 2
-                            nww_to_wh_df.at[0, 'slot'] = slot
-                            nww_to_wh_df.at[0, 'action'] = "book"
-                            nww_to_wh_json = nww_to_wh_df.to_json()
-                            nww_msg_to_wh = opf.nww_msg_to(nww_to_wh_json)
-                            wh_occupied = []
-                            wh_assigned = []
-                            # var1, var2 = wh_assigned
-                            for i in jid_list:
-                                nww_msg_to_wh.to = i
-                                await self.send(nww_msg_to_wh)
-                                wh_msg = await self.receive(timeout=wait_msg_time)
-                                if wh_msg:
-                                    msg_sender_jid = str(wh_msg.sender)
-                                    msg_sender_jid = msg_sender_jid[:-9]
-                                    if msg_sender_jid == i:
-                                        if format(wh_msg.body) == "negative":
-                                            wh_occupied.append(i)
-                                            continue
-                                        elif format(wh_msg.body) == "positive":
-                                            wh_assigned.append(i)
-                                            print("wh assigned")
-                                            delivered_to_wh = opf.get_agent_name(msg_sender_jid, my_dir)
-                                            auction_df.at[0, 'delivered_to_wh'] = delivered_to_wh  # save to auction df
-                                            auction_df.at[0, 'wh_location'] = opf.get_agent_location(delivered_to_wh)
-                                            """inform log of wh booking"""
-                                            nww_msg_log_json = opf.confirm_wh_booking_to_log(nww_to_wh_df, wh_assigned, my_dir, closest_wh_df)
-                                            nww_msg_log = opf.msg_to_log(nww_msg_log_json, my_dir)
-                                            await self.send(nww_msg_log)
-                                            auction_df.at[0, 'wh_booking_confirmation_at'] = datetime.datetime.now()  # Save information to auction df
-                                            """change of status"""
-                                            nww_status_var = "auction"  # Status change to auction in which negotiation with coil takes place
-                                            """inform log of change of status"""
-                                            nww_inform_json = opf.inform_log_df(my_full_name, nww_status_started_at, nww_status_var).to_json()
-                                            nww_msg_log = opf.msg_to_log(nww_inform_json, my_dir)
-                                            await self.send(nww_msg_log)
-                                            auction_start = datetime.datetime.now()
-                                            break
-                                        else:
-                                            print(f'{wh_msg.sender} did not set a correct msg.body: {wh_msg.body} in communication with {my_full_name}')
-                                            """inform log of issue"""
-                                            nww_msg_log_body = f'{wh_msg.sender} did not set a correct msg.body: {wh_msg.body} in communication with {my_full_name}'
-                                            nww_msg_log = opf.msg_to_log(nww_msg_log_body, my_dir)
-                                            await self.send(nww_msg_log)
-                                            print(nww_msg_log_body)
-                                    else:
-                                        """inform log of issue"""
-                                        nww_msg_log_body = f'{my_full_name} received a msg from {msg_sender_jid} rather than {br_jid}'
-                                        nww_msg_log = opf.msg_to_log(nww_msg_log_body, my_dir)
-                                        await self.send(nww_msg_log)
-                                        print(nww_msg_log_body)
-                                else:
-                                    """inform log of issue"""
-                                    nww_msg_log_body = f'{my_full_name} did not receive answer from {i} to book wh'
-                                    nww_msg_log = opf.msg_to_log(nww_msg_log_body, my_dir)
-                                    await self.send(nww_msg_log)
-                                    print(nww_msg_log_body)
-
-                        else:
-                            """inform log of issue"""
-                            nww_msg_log_body = f'{my_full_name} received a msg from {msg_sender_jid} rather than {br_jid}'
-                            nww_msg_log = opf.msg_to_log(nww_msg_log_body, my_dir)
-                            await self.send(nww_msg_log)
-                            print(nww_msg_log_body)
-                    else:
-                        """inform log"""
-                        coil_msg_log_body = f'{my_full_name} did not receive any msg in the last {wait_msg_time}s at {nww_status_var}'
-                        coil_msg_log = opf.msg_to_log(coil_msg_log_body, my_dir)
-                        await self.send(coil_msg_log)
-
-                else:
-                    """inform log of issue"""
-                    nww_msg_log_body = f'Transport and warehouse booking are not required, auction starts'
-                    nww_msg_log = opf.msg_to_log(nww_msg_log_body, my_dir)
-                    await self.send(nww_msg_log)
-                    print(nww_msg_log_body)
-                    """change of status"""
-                    nww_status_var = "auction"  # Status change to auction in which negotiation with coil takes place
-                    """inform log of change of status"""
-                    nww_inform_json = opf.inform_log_df(my_full_name, nww_status_started_at, nww_status_var).to_json()
-                    nww_msg_log = opf.msg_to_log(nww_inform_json, my_dir)
-                    await self.send(nww_msg_log)
-                    auction_start = datetime.datetime.now()
-
-
-            elif nww_status_var == "auction":
-
-                auction_df.at[0, 'auction_start'] = auction_start # Save information to auction df
-                print(f'auction_start: {auction_start}')
-                # NOW THAT WH AND TR ARE BOOKED. ENTERS AUCTION FOR COILS.
-                """Asks browser for active coils and locations"""
-                #  Builds msg to br
-                nww_request_type = "coils"
-                nww_msg_br_body = opf.req_active_users_loc_times(nww_data_df, nww_request_type)  # returns a json with request info to browser
-                nww_msg_br = opf.msg_to_br(nww_msg_br_body, my_dir)
-                # returns a msg object with request info to browser and message setup
-                await self.send(nww_msg_br)
-                br_msg = await self.receive(timeout=wait_msg_time)
-                if br_msg:
-                    if str(br_msg.body) == "positive" or str(br_msg.body) == "negative":
-                        """Inform log"""
-                        nww_msg_log_body = f'{my_full_name} received answer from tc rather than browser with msg: {br_msg.body}'
-                        nww_msg_log = opf.msg_to_log(nww_msg_log_body, my_dir)
-                        await self.send(nww_msg_log)
-                        print(nww_msg_log_body)
-                    else:
-                        print(f'br_msg_body: {br_msg.body}')
-                        br_data_df = pd.read_json(br_msg.body)
-                        br_jid = opf.br_jid(my_dir)
-                        msg_sender_jid = str(br_msg.sender)
-                        msg_sender_jid = msg_sender_jid[:-9]
-                        """Send a message to all active coils presenting auction and ideal conditions"""
-                        if msg_sender_jid == br_jid:
-                            closest_coils_df = opf.get_coil_list(br_data_df, my_full_name, my_dir)
-                            auction_df.at[0, 'active_coils'] = [closest_coils_df['Name'].to_list()]  # Save information to auction df
-                            nww_data_df.at[0, 'auction_level'] = 1  # initial auction level
-                            nww_data_df.at[0, 'bid_status'] = 'bid'
-                            nww_to_coils_df = opf.nww_to_coils_initial_df(nww_data_df, nww_prev_coil_df, lot_size)
-                            nww_to_coils_json = nww_to_coils_df.to_json()  # json to send to coils with auction info including last geometrical values and other parameters
-                            # Create a loop to inform of auctionable resource to willing to be fab coils.
-                            jid_list = closest_coils_df['User name'].tolist()
-                            nww_msg_to_coils = opf.nww_msg_to(nww_to_coils_json)
-                            for z in jid_list:
-                                nww_msg_to_coils.to = z
-                                await self.send(nww_msg_to_coils)
-                            """Create a loop to receive all* the messages"""
-                            coil_msgs_df = pd.DataFrame()
-                            print(range(len(jid_list)))
-                            for i in range(len(jid_list)):  # number of messages that enter auction
-                                coil_msg = await self.receive(timeout=wait_msg_time / len(jid_list))
-                                if coil_msg:
-                                    msg_sender_jid0 = str(coil_msg.sender)
-                                    msg_sender_jid = msg_sender_jid0[:-33]
-                                    print(f'msg_sender_jid-33: {msg_sender_jid}')
-                                    if msg_sender_jid == "c0":
-                                        coil_msg_df = pd.read_json(coil_msg.body)
-                                        coil_jid = str(coil_msg.sender)
-                                        coil_jid = coil_jid[:-9]
-                                        coil_msg_df.at[0, 'coil_jid'] = coil_jid
-                                        coil_msgs_df = coil_msgs_df.append(coil_msg_df)  # received msgs
-                                        print('received msgs from coils')
-                                        """Inform log """
-                                        nww_msg_log_body = f'{my_full_name} receives a bid from {coil_jid}.'
-                                        nww_msg_log = opf.msg_to_log(nww_msg_log_body, my_dir)
-                                        await self.send(nww_msg_log)
-
-                                    else:
-                                        """inform log of issue"""
-                                        nww_msg_log_body = f'{my_full_name} received a msg from {msg_sender_jid} rather than coil'
-                                        nww_msg_log = opf.msg_to_log(nww_msg_log_body, my_dir)
-                                        await self.send(nww_msg_log)
-                                        print(nww_msg_log_body)
-                                else:
-                                    """Inform log """
-                                    nww_msg_log_body = f'{my_full_name} did not receive answer from coil'
-                                    nww_msg_log = opf.msg_to_log(nww_msg_log_body, my_dir)
-                                    await self.send(nww_msg_log)
-                                    print(nww_msg_log_body)
-
-                            if not coil_msgs_df.empty:
-                                nww_data_df.at[0, 'auction_level'] = 2  # Second level
-                                coil_msgs_df = coil_msgs_df.reset_index(drop=True)
-                                auction_df.at[0, 'auction_coils'] = [coil_msgs_df['id'].to_list()]  # Send info to log
-                                bids_ev_df = opf.nww_auction_bid_evaluation(coil_msgs_df, nww_data_df)  # Returns a df with an extra column with rating to coils proposal.
-                                auction_df.at[0, 'coil_ratings_1'] = [bids_ev_df.to_dict()]
-                                print('rating given to received msgs from coils')
-                                print(f'bids_ev_df: {bids_ev_df.to_string()}')
-                                print(f'coil_msgs_df: {coil_msgs_df.to_string()}')
-                                """Evaluate if negotiation is needed"""
-                                nww_counter_bid_df = opf.nww_negotiate(bids_ev_df, coil_msgs_df)  # Returns a df with coils to send message asking to counterbid
-                                print(nww_counter_bid_df.to_string())
-                                if len( nww_counter_bid_df['coil_jid']) >= 2:  # at least 2 coils have similar rating.
-                                    for i in nww_counter_bid_df['coil_jid'].tolist():
-                                        """Ask for extra bid"""
-                                        nww_data_df.at[0, 'bid_status'] = 'extrabid'
-                                        nww_coil_extra_msg = opf.nww_msg_to(nww_data_df.to_json())
-                                        nww_coil_extra_msg.to = i
-                                        await self.send(nww_coil_extra_msg)
-                                    """Create a loop to receive all the messages"""
-                                    coil_msgs_df_2 = pd.DataFrame()
-                                    for i in range(len(nww_counter_bid_df['coil_jid'])):
-                                        coil_msg = await self.receive(timeout=wait_msg_time / len(nww_counter_bid_df['coil_jid']))
-                                        if coil_msg:
-                                            msg_sender_jid0 = str(coil_msg.sender)
-                                            msg_sender_jid = msg_sender_jid0[:-33]
-                                            print(f'msg_sender_jid-33_: {msg_sender_jid}')
-                                            print(msg_sender_jid)
-                                            if msg_sender_jid == "c0":
-                                                coil_msg_df = pd.read_json(coil_msg.body)
-                                                coil_jid = coil_msg.sender
-                                                coil_msg_df_2.at[0, 'coil_jid'] = coil_jid
-                                                coil_msgs_df_2 = coil_msgs_df.append(coil_msg_df)  # received msgs
-                                            else:
-                                                """inform log of issue"""
-                                                nww_msg_log_body = f'{my_full_name} received a msg from {msg_sender_jid} rather than coil'
-                                                nww_msg_log = opf.msg_to_log(nww_msg_log_body, my_dir)
-                                                await self.send(nww_msg_log)
-                                                print(nww_msg_log_body)
-                                        else:
-                                            """Inform log """
-                                            nww_msg_log_body = f'{my_full_name} did not receive answer from any coil'
-                                            nww_msg_log = opf.msg_to_log(nww_msg_log_body, my_dir)
-                                            await self.send(nww_msg_log)
-                                            print(nww_msg_log_body)
-
-                                    if not coil_msgs_df_2.empty:
-                                        """Evaluate extra bids and give a rating"""
-                                        coil_msgs_df_2 = coil_msgs_df_2.reset_index(drop=True)
-                                        nww_data_df.at[0, 'auction_level'] = 3  # third level
-                                        bids_ev_df_2 = opf.nww_auction_bid_evaluation(coil_msgs_df_2,  nww_data_df)
-                                        coil_jid_winner_df = opf.nww_negotiate(bids_ev_df, coil_msgs_df_2)
-                                        """Inform coil of assignation and agree on assignation"""
-                                        # Iterate over finalist bidders to confirm assignation
-                                        for i in range(len(coil_jid_winner_df['coil_jid'])):
-                                            coil_jid_winner = coil_jid_winner_df.loc[i, 'coil_jid']
-                                            print(f'coil_jid_winner_2: {coil_jid_winner}')
-                                            coil_winner_df=coil_jid_winner_df.loc[coil_jid_winner['coil_jid']==coil_jid_winner]
-                                            coil_jid_winner = str(coil_jid_winner)
-                                            nww_data_df.at[0, 'bid_status'] = 'acceptedbid'
-                                            nww_coil_winner_msg = opf.nww_msg_to(nww_data_df.to_json())
-                                            nww_coil_winner_msg.to = coil_jid_winner[:-9]
-                                            await self.send(nww_coil_winner_msg)
-                                            # Receive answer and check if confirmation of assignation is done
-                                            coil_msg = await self.receive(timeout=wait_msg_time)
-                                            if coil_msg:
-                                                msg_sender_jid0 = str(coil_msg.sender)
-                                                msg_sender_jid = msg_sender_jid0[:-33]
-                                                print(f'msg_sender_jid-33_: {msg_sender_jid}')
-                                                print(msg_sender_jid)
-                                                if msg_sender_jid == "c0":
-                                                    coil_msg_df = pd.read_json(coil_msg.body)
-                                                    coil_jid = coil_msg.sender
-                                                    coil_msg_df.at[0, 'coil_jid'] = coil_jid
-                                                    if coil_msg_df.loc[0, 'bid_status'] == 'acceptedbid':
-                                                        """Save winner information"""
-                                                        auction_df.at[0, 'coil_ratings_2'] = [bids_ev_df_2.to_dict()]  # Save information to auction df
-                                                        """Calculate processing time"""
-                                                        process_df = opf.process_df(process_df, coil_jid_winner_df, nww_to_tr_df)
-                                                        """Inform log of assignation and auction KPIs"""
-                                                        nww_msg_log_body = opf.auction_kpis(nww_data_df, bids_ev_df_2, auction_df, process_df, nww_counter_bid_df, coil_jid_winner_df)
-                                                        print(f'nww_msg_log_body:{nww_msg_log_body}')
-                                                        nww_msg_log_body_json = nww_msg_log_body.to_json()
-                                                        print(f'nww_msg_log_body_json:{nww_msg_log_body_json}')
-                                                        nww_msg_log = opf.msg_to_log(nww_msg_log_body_json, my_dir)
-                                                        op_times_df.at[0, 'AVG(nww_op_time)'] = nww_msg_log_body.loc[0, 'AVG(nww_op_time)']
-                                                        op_times_df.at[0, 'AVG(tr_op_time)'] = nww_msg_log_body.loc[0, 'AVG(tr_op_time)']
-                                                        await self.send(nww_msg_log)
-                                                        """change status to stand-by until next auction"""
-                                                        nww_status_var = "stand_by"
-                                                        nww_data_df = opf.modify_nww_data_df(process_df, nww_data_df)  # modify nww_data_df
-                                                        if coil_msg_df.loc[0,'F_group']==nww_prev_coil_df.loc[0,'F_group']:
-                                                            lot_size=lot_size + coil_msg_df.loc[0,'coil_weight']
-                                                        else:
-                                                            lot_size=int(0)
-
-                                                        nww_prev_coil_df = nww_data_df[['coil_length','coil_width','coil_thickness','coil_weight','parameter_F','F_group','lot_size','lot_number']]
-                                                        fab_started_at = process_df['fab_start'].iloc[-1]
-                                                        break
-                                                    else:
-                                                        """Inform log """
-                                                        nww_msg_log_body = f'{my_full_name} did not receive answer from finalist coil'
-                                                        nww_msg_log = opf.msg_to_log(nww_msg_log_body, my_dir)
-                                                        await self.send(nww_msg_log)
-                                                        print(nww_msg_log_body)
-                                                else:
-                                                    """inform log of issue"""
-                                                    nww_msg_log_body = f'{my_full_name} received a msg from {msg_sender_jid} rather than coil'
-                                                    nww_msg_log = opf.msg_to_log(nww_msg_log_body, my_dir)
-                                                    await self.send(nww_msg_log)
-                                                    print(nww_msg_log_body)
-                                            else:
-                                                """Inform log """
-                                                nww_msg_log_body = f'{my_full_name} did not receive answer from coil'
-                                                nww_msg_log = opf.msg_to_log(nww_msg_log_body, my_dir)
-                                                await self.send(nww_msg_log)
-                                                print(nww_msg_log_body)
-                                    else:
-                                        """Inform log """
-                                        nww_msg_log_body = f'{my_full_name} did not receive answer from any coil'
-                                        nww_msg_log = opf.msg_to_log(nww_msg_log_body, my_dir)
-                                        await self.send(nww_msg_log)
-                                        print(nww_msg_log_body)
-
-                                elif len(nww_counter_bid_df['coil_jid']) == 1:  # if there is a strong winner
-                                    """Inform coil of assignation"""
-                                    nww_data_df.at[0, 'bid_status'] = 'acceptedbid'
-                                    coil_jid_winner = nww_counter_bid_df.loc[0, 'coil_jid']
-                                    nww_coil_winner_msg = opf.nww_msg_to(nww_data_df.to_json())
-                                    print(nww_coil_winner_msg)
-                                    print(f'coil_jid_winner_1: {coil_jid_winner}')
-                                    coil_jid_winner = str(coil_jid_winner)
-                                    print(f'coil_jid_winner_1_: {coil_jid_winner}')
-                                    nww_coil_winner_msg.to = coil_jid_winner[:-9]
-                                    await self.send(nww_coil_winner_msg)
-                                    """Create a loop to receive all the messages"""
-                                    coil_msgs_df = pd.DataFrame()
-                                    coil_msg = await self.receive(timeout=wait_msg_time / len(nww_counter_bid_df['coil_jid']))
-                                    if coil_msg:
-                                        msg_sender_jid0 = str(coil_msg.sender)
-                                        msg_sender_jid = msg_sender_jid0[:-9]
-                                        print(f'msg_sender_jid-9_: {msg_sender_jid}')
-                                        print(msg_sender_jid)
-                                        if msg_sender_jid == coil_jid_winner:
-                                            coil_msg_df = pd.read_json(coil_msg.body)
-                                            if coil_msg_df.loc[0, 'bid_status'] == "acceptedbid":
-                                                """Calculate processing time"""
-                                                print(bids_ev_df.to_string())
-                                                process_df = opf.nww_process_df(process_df, nww_counter_bid_df, nww_to_tr_df)
-                                                """Inform log of assignation and auction KPIs"""
-                                                nww_msg_log_body = opf.auction_kpis(nww_data_df, bids_ev_df, auction_df, process_df,  nww_counter_bid_df)  # in this case, counterbid_df only contains 1 row with winner info
-                                                nww_msg_log = opf.msg_to_log(nww_msg_log_body.to_json(), my_dir)
-                                                op_times_df.at[0, 'AVG(nww_op_time)'] = nww_msg_log_body.loc[0, 'AVG(nww_op_time)']
-                                                op_times_df.at[0, 'AVG(tr_op_time)'] = nww_msg_log_body.loc[0, 'AVG(tr_op_time)']
-                                                await self.send(nww_msg_log)
-                                                """change status to stand-by until next auction"""
-                                                nww_status_var = "stand_by"
-                                                nww_data_df = opf.modify_nww_data_df(process_df, nww_data_df)  # modify nww_data_df
-                                                if coil_msg_df.loc[0,'F_group']==nww_prev_coil_df.loc[0,'F_group']:
-                                                    lot_size=lot_size + coil_msg_df.loc[0,'coil_weight']
-                                                else:
-                                                    lot_size=int(0)
-
-                                                print(f'process_df: {process_df.to_string()}')
-                                                print(f'nww_data_df: {nww_data_df.to_string()}')
-                                                nww_prev_coil_df = nww_data_df[['coil_length','coil_width','coil_thickness','coil_weight','parameter_F','F_group','lot_size','lot_number']]
-                                                print(f'nww_prev_coil_df: {nww_prev_coil_df.to_string()}')
-                                                fab_started_at = process_df['fab_start'].iloc[-1]
-                                            else:
-                                                """inform log of issue"""
-                                                coil_id = coil_msg_df.loc[0, 'id']
-                                                nww_msg_log_body = f'{coil_id} rejected final acceptance to {my_full_name}'
-                                                nww_msg_log = opf.msg_to_log(nww_msg_log_body, my_dir)
-                                                await self.send(nww_msg_log)
-                                                print(nww_msg_log_body)
-                                        else:
-                                            """inform log of issue"""
-                                            nww_msg_log_body = f'{my_full_name} received a msg from {msg_sender_jid} rather than {coil_jid_winner}'
-                                            nww_msg_log = opf.msg_to_log(nww_msg_log_body, my_dir)
-                                            await self.send(nww_msg_log)
-                                            print(nww_msg_log_body)
-                                    else:
-                                        """Inform log """
-                                        nww_msg_log_body = f'{my_full_name} did not receive answer from {coil_jid_winner}'
-                                        nww_msg_log = opf.msg_to_log(nww_msg_log_body, my_dir)
-                                        await self.send(nww_msg_log)
-                                        print(nww_msg_log_body)
-                                else:
-                                    """inform log of issue"""
-                                    nww_msg_log_body = f'{my_full_name} error on evaluation if negotiation is needed'
-                                    nww_msg_log = opf.msg_to_log(nww_msg_log_body, my_dir)
-                                    await self.send(nww_msg_log)
-                                    print(nww_msg_log_body)
-                            else:
+                                auction_df.at[0, 'active_coils'] = br_data_df
+                                #
+                                # initial auction level
+                                nww_data_df.at[0, 'auction_level'] = 1
+                                nww_data_df.at[0, 'bid_status'] = 'bid'
+                                nww_to_coils_df = asf.nww_to_coils_initial_df(nww_data_df, nww_prev_coil_df, lot_size)
+                                # json to send to coils with auction info
+                                # including last dimensional values
+                                nww_to_coils_json = nww_to_coils_df.to_json()
+                                # Create a loop to inform of auctionable
+                                # resource to willing to be fab coils.
+                                jid_list = br_data_df
+                                auction_df.at[0, 'number_preauction'] = auction_df.at[0, \
+                                            'number_preauction'] + 1
+                                number = int(auction_df.at[0, 'number_auction'])
                                 """Inform log """
-                                nww_msg_log_body = f'{my_full_name} did not receive answer from any coil. coils_msgs_df is empty'
-                                nww_msg_log = opf.msg_to_log(nww_msg_log_body, my_dir)
+                                nww_log_msg = asf.send_nww(my_full_name, number,  \
+                                            nww_data_df.at[0, 'auction_level'], jid_list)
+                                nww_log_json= nww_log_msg.to_json(orient="records")
+                                nww_msg_log = asf.msg_to_log(nww_log_json, my_dir)
                                 await self.send(nww_msg_log)
-                                print(nww_msg_log_body)
+                                nww_msg_to_coils = asf.nww_msg_to(nww_to_coils_json,\
+                                            globals.gnww_jid)
+                                for z in jid_list:
+                                    # Ask Coils
+                                    id_org  = int(random.random()*10000)
+                                    cl_agent= asf.rq_list(my_full_name,nww_to_coils_df,\
+                                            z,'invitation',id_org)
+                                    cl_ans  = asf.contact_list_json(cl_agent,z)
+                                    await self.send(cl_ans)
+                                    curr = datetime.datetime.now()
+                                    globals.tosend.append({'idorg':id_org,'agnt_org': \
+                                            globals.gnww_jid,'act':'invitation',\
+                                            'agnt_dst':z,'dt':curr,'st':'pre-auction'})
+                                # print(' From BR: ')
+                                # print(globals.tosend)
+                    elif recl is not None: # Means we have a coil answer ...
+                        # print('Message from coil ...')
+                        # print(globals.tosend)
+                        # print('=======')
+                        coil_jid = str(msg_ag.sender)
+                        msg_snd_jid = coil_jid.split('/')[0]
+                        cl_df = pd.read_json(msg_ag.body)
+                        if cl_df.loc[0,'purpose'] == 'answer2invitation':
+                            seqce = cl_df.loc[0,'seq']
+                            coil_msg_df = pd.read_json(cl_df.loc[0,'msg'])
+                            coil_msg_df.at[0,'coil_jid'] = msg_snd_jid
+                            coil_msgs_df = coil_msgs_df.append(coil_msg_df)  # received msgs
+                            coil_msgs_df.reset_index(drop=True,inplace=True)
+                            glist = self.del_agnt(seqce,globals.tosend)
+                            globals.tosend = glist
+                            [mindt,ref] = self.min_dt('invitation','pre-auction')
+                            #
+                            # print(' Remaining: ' + str(self.act_qry('invitation','pre-auction')))
+                            # print(globals.tosend)
+                            if self.act_qry('invitation','pre-auction') == 0 or \
+                                    (ref-mindt).total_seconds() > 15:
+                                # Time for resolving the pre-auction
+                                nww_status_var = "auction"
+                                auction_start = datetime.datetime.now() - \
+                                    datetime.timedelta(seconds=70)
+                                auction_df.at[0, 'auction_start'] = None
+                                coil_msgs_df2 = pd.DataFrame() # Preparing the auction
+                                # print(' Pasamos a AUCTION')
+                                # print(' .................')
                         else:
-                            """inform log of issue"""
-                            nww_msg_log_body = f'{my_full_name} received a msg from {msg_sender_jid} rather than {br_jid}'
-                            nww_msg_log = opf.msg_to_log(nww_msg_log_body, my_dir)
+                            """Inform log """
+                            msgerr = cl_df.loc[0,'purpose']
+                            nww_msg_log_body = f'{my_full_name} received answer ' + \
+                                    f'from {msg_snd_jid} a special msg: {msgerr}.'
+                            nww_df = pd.DataFrame()
+                            nww_df.loc[0,'purpose'] = 'inform_error'
+                            nww_df.loc[0,'msg'] = nww_msg_log_body
+                            nww_msg_log = asf.msg_to_log(nww_df.to_json(\
+                                     orient="records"), my_dir)
                             await self.send(nww_msg_log)
-                            print(nww_msg_log_body)
-                else:
-                    """inform log"""
-                    coil_msg_log_body = f'{my_full_name} did not receive any msg in the last {wait_msg_time}s at {nww_status_var}'
-                    coil_msg_log = opf.msg_to_log(coil_msg_log_body, my_dir)
-                    await self.send(coil_msg_log)
+                            # print(' Unexpected: ' + cl_df.loc[0,'purpose'])
+                    elif 'LAUN' in str(msg_ag.sender).upper():
+                        # Message from Launcher requesting parameter update ...
+                        msgl = pd.read_json(msg_ag.body)
+                        msg_sender_jid = str(msg_ag.sender).split('/')[0]
+                        if msgl.loc[0,'purpose'] == 'exit':
+                            await self.ask_exit() # To log ...
+                            self.kill() # To end.
+                        elif msgl.loc[0,'purpose'] == 'search':
+                            id_ag = msgl.loc[0,'seq']
+                            cl_ag = asf.rq_list(my_full_name, all_auctions, \
+                                         msg_sender_jid,'history',id_ag)
+                            cnt_lst = asf.contact_list_json(cl_ag,msg_sender_jid)
+                            await self.send(cnt_lst)
+                        elif msgl.loc[0,'purpose'] == 'status_nww':
+                            #
+                            # Answering current properties to browser.
+                            st = pd.DataFrame([{\
+                                 'Code':nww_data_df.loc[0,'id'],\
+                                 'From':nww_data_df.loc[0,'oname'],\
+                                 'msg': nww_data_df.loc[0,'name'], \
+                                 'Location': nww_data_df.loc[0,'From'],
+                                 'Capacity': nww_data_df.loc[0,'budget'], \
+                                 'purpose':'report', \
+                                 'ancho':nww_data_df.loc[0,'ancho'],\
+                                 'espesor': nww_data_df.loc[0,'espesor'],\
+                                 'largo': nww_data_df.loc[0,'largo'],\
+                                 'parF': nww_data_df.loc[0,'param_f'],\
+                                 'sdate': nww_data_df.loc[0,'ship_date'],\
+                                 'status': nww_status_var, \
+                                 'parF': nww_data_df.loc[0,'param_f'],\
+                                 'sgrade': nww_data_df.loc[0,'sgrade']}]).to_json(\
+                                            orient="records")
+                            rep= asf.msg_to_agnt(st,msgl.loc[0,'id'])
+                            await self.send(rep)
+                #
+                # else:
+                #     print(' What is this?')
+                #     print('Preauction and not message to read')
+                #     print(self.act_qry('ask-coils','pre-auction'))
+                #     print(' Diff:' + str(diff))
+                #     print('===***===')
+            if nww_status_var == "auction":
+                diff=(datetime.datetime.now()-auction_start).total_seconds()
+                # print(' Auction: ' + str(self.act_qry('counterbid','auction')) +\
+                #                             ' Sncds:'+ str(diff))
+                if self.act_qry('counterbid','auction') == 0 and \
+                        coil_msgs_df.shape[0] > 0 and diff > 25:
+                    if auction_df.at[0, 'auction_start'] == None:
+                        auction_df.at[0, 'auction_start'] = auction_start
+                        auction_df.at[0, 'number_auction'] = auction_df.at[\
+                                0, 'number_auction'] + 1
+                    number = int(auction_df.at[0, 'number_auction'])
+                    bid_list = coil_msgs_df.loc[:, 'id'].tolist()
+                    bid_list_msg = str(bid_list)
+                    nww_data_df.at[0, 'auction_level'] = 2
+                    """Evaluating coil bids"""
+                    coil_msgs_df = coil_msgs_df[coil_msgs_df['bid'] > 0]
+                    coil_msgs_df = coil_msgs_df.reset_index(drop=True)
+                    auction_df.at[0, 'auction_coils'] = [str(coil_msgs_df['id'\
+                                ].to_list())]
+                    jid_list = coil_msgs_df['id'].to_list()
+                    if len(jid_list) > 0:
+                        bid_coil = asf.nww_bid_evaluation(coil_msgs_df, nww_data_df,'bid')
+                        bid_coil = asf.nww_negotiate(bid_coil, coil_msgs_df)
+                        bid_coil['bid_status'] = 'counterbid'
+                        jid_list = bid_coil.loc[:, 'coil_jid'].tolist()
+                        result = asf.nww_result(bid_coil, jid_list,'bid')
 
-            elif nww_status_var == "stand-by": # stand-by status for NWW is very useful. It changes to pre-auction, when there are 3 minutes left to the end of current processing.
-                """inform log of status"""
-                nww_inform_json = opf.inform_log_df(my_full_name, nww_status_started_at, nww_status_var).to_json()
-                nww_msg_log = opf.msg_to_log(nww_inform_json, my_dir)
-                await self.send(nww_msg_log)
-                """Starts next auction when there is some time left before current fab ends"""
-                if process_df['start_next_auction_at'].iloc[-1] < datetime.datetime.now():
+                        """Coil order,Biggest difference (bid-min price), bid, minimum price. To Log"""
+                        diff = bid_coil['difference'].to_list()
+                        bids = bid_coil['bid'].to_list()
+                        minp = bid_coil['minimum_price'].to_list()
+                        nww_df = pd.DataFrame()
+                        nww_df.loc[0, 'Line'] = my_full_name.upper()
+                        nww_df.loc[0, 'Level'] = 'BID'
+                        nww_df.loc[0,'Positions'] = json.dumps(jid_list)
+                        nww_df.loc[0,'Difference'] = json.dumps(diff)
+                        nww_df.loc[0,'Bid'] = json.dumps(bids)
+                        nww_df.loc[0,'Minimum_price'] = json.dumps(minp)
+                        nww_msg_log = asf.msg_to_log(nww_df.to_json(\
+                                 orient="records"), my_dir)
+                        await self.send(nww_msg_log)
+
+                    if len(result['Coil'].to_list()) >= 2:
+                        for z in jid_list:
+                            """Inform log """
+                            nww_msg_body = asf.send_nww(my_full_name, number, \
+                                        nww_data_df.at[0, 'auction_level'], jid_list)
+                            nww_msg_bdjs = nww_msg_body.to_json(orient="records")
+                            nww_msg_log = asf.msg_to_log(nww_msg_bdjs, my_dir)
+                            await self.send(nww_msg_log)
+                            """Ask coils for counterbid"""
+                            id_org  = int(random.random()*10000)
+                            cl_agent= asf.rq_list(my_full_name,bid_coil,\
+                                    z,'counterbid',id_org)
+                            cl_ans  = asf.contact_list_json(cl_agent,z)
+                            await self.send(cl_ans)
+                            curr = datetime.datetime.now()
+                            globals.tosend.append({'idorg':id_org,'agnt_org': \
+                                    globals.gnww_jid,'act':'counterbid',\
+                                    'agnt_dst':z,'dt':curr,'st':'auction'})
+                    else:
+                        nww_status_var = "post-auction"
+                        pending_au    = True
+                        post_auction_step = datetime.datetime.now() - \
+                            datetime.timedelta(seconds=70)
+                        coil_msgs_df2 = result
+                        results_2 = result
+                        results_2.loc[0, 'Profit'] = results_2.loc[0, 'Difference']
+                        results_2.loc[0, 'Counterbid'] = results_2.loc[0, 'Bid']
+                        """Inform coil of assignation and agree on assignation"""
+                        coil_notified = -1 # Not yet communicated
+                #
+                """ Process the messages """
+                msg_ag = await self.receive(timeout=wait_msg_time)
+                if msg_ag:
+                    cl_df = pd.read_json(msg_ag.body)
+                    lstids= [i['idorg'] for i in globals.tosend]
+                    # print('\n***\n   Auction MSG:' + msg_ag.body)
+                    # print(str(cl_df.loc[0,'seq']) + ' in '+' '.join(str(e) for e in lstids) + ' ? ')
+                    recl = re.match(r'^c\d+',str(msg_ag.sender).split('@')[0]) # Message from coils
+                    if recl is not None and cl_df.loc[0,'seq'] in lstids: # Message from coil agents
+                        #
+                        # print(msg_ag.body)
+                        # print(globals.tosend)
+                        # print(' -------------\n')
+                        coil_jid = str(msg_ag.sender)
+                        msg_snd_jid = coil_jid.split('/')[0]
+                        cl_df = pd.read_json(msg_ag.body)
+                        if cl_df.loc[0,'purpose'] == 'answer2counterbid':
+                            seqce = cl_df.loc[0,'seq']
+                            coil_msg_df2 = pd.read_json(cl_df.loc[0,'msg'])
+                            coil_msg_df2.at[0,'coil_jid'] = msg_snd_jid
+                            coil_msgs_df2 = coil_msgs_df2.append(coil_msg_df2)
+                            coil_msgs_df2.reset_index(drop=True,inplace=True)
+                            glist = self.del_agnt(seqce,globals.tosend)
+                            globals.tosend = glist
+                            [mindt,ref] = self.min_dt('counterbid','auction')
+                            dlt = (ref-mindt).microseconds / 1.e+6
+                            # print('Remaining: ' + str(len(globals.tosend)))
+                            if len(globals.tosend) == 0 or dlt > 15:
+                                # Time for resolving the auction
+                                if coil_msgs_df2.shape[0] > 0:
+                                    nww_status_var = "post-auction"
+                                    pending_au    = True
+                                    post_auction_step = datetime.datetime.now() - \
+                                        datetime.timedelta(seconds=70)
+                                    counterbid_coil = asf.nww_bid_evaluation(coil_msgs_df2, \
+                                                nww_data_df,'counterbid')
+
+                                    """Coil order,Profit, counterbid, minimum price. To Log"""
+                                    coils = counterbid_coil['coil_jid'].to_list()
+                                    diff = counterbid_coil['profit'].to_list()
+                                    bids = counterbid_coil['counterbid'].to_list()
+                                    minp = counterbid_coil['minimum_price'].to_list()
+                                    nww_df = pd.DataFrame()
+                                    nww_df.loc[0, 'Line'] = my_full_name.upper()
+                                    nww_df.loc[0, 'Level'] = 'COUNTERBID'
+                                    nww_df.loc[0,'Positions'] = json.dumps(coils)
+                                    nww_df.loc[0,'Difference'] = json.dumps(diff)
+                                    nww_df.loc[0,'Counterbid'] = json.dumps(bids)
+                                    nww_df.loc[0,'Minimum_price'] = json.dumps(minp)
+                                    nww_msg_log = asf.msg_to_log(nww_df.to_json(\
+                                             orient="records"), my_dir)
+                                    await self.send(nww_msg_log)
+
+                                    """Inform coil of assignation and agree on assignation"""
+                                    jid_list_2= counterbid_coil.loc[:,'coil_jid'].tolist()
+                                    results_2 = asf.nww_result(counterbid_coil, \
+                                                jid_list_2,'counterbid')
+                                    coil_notified = -1 # Not yet communicated
+                                else:
+                                    nww_status_var == "stand-by"
+                        else:
+                            # print('What ???')
+                            """Inform log """
+                            msgerr = cl_df.loc[0,'purpose']
+                            nww_msg_log_body = f'{my_full_name} received answer ' + \
+                                    f'from {msg_snd_jid} a special msg: {msgerr}.'
+                            nww_df = pd.DataFrame()
+                            nww_df.loc[0,'purpose'] = 'inform_error'
+                            nww_df.loc[0,'msg'] = nww_msg_log_body
+                            nww_msg_log = asf.msg_to_log(nww_df.to_json(\
+                                     orient="records"), my_dir)
+                            await self.send(nww_msg_log)
+
+                    elif 'LAUN' in str(msg_ag.sender).upper():
+                        # Message from Launcher requesting parameter update ...
+                        msgl = pd.read_json(msg_ag.body)
+                        msg_sender_jid = str(msg_ag.sender).split('/')[0]
+                        if msgl.loc[0,'purpose'] == 'exit':
+                            await self.ask_exit() # To log ...
+                            self.kill() # To end.
+                        elif msgl.loc[0,'purpose'] == 'search':
+                            #
+                            id_ag = msgl.loc[0,'seq']
+                            cl_ag = asf.rq_list(my_full_name, all_auctions, \
+                                         msg_sender_jid,'history',id_ag)
+                            cnt_lst = asf.contact_list_json(cl_ag,msg_sender_jid)
+                            await self.send(cnt_lst)
+                        elif msgl.loc[0,'purpose'] == 'status_nww':
+                            #
+                            # Answering current properties to browser.
+                            st = pd.DataFrame([{\
+                                 'Code':nww_data_df.loc[0,'id'],\
+                                 'From':nww_data_df.loc[0,'oname'],\
+                                 'msg': nww_data_df.loc[0,'name'], \
+                                 'Location': nww_data_df.loc[0,'From'],
+                                 'Capacity': nww_data_df.loc[0,'budget'], \
+                                 'purpose':'report', \
+                                 'ancho':nww_data_df.loc[0,'ancho'],\
+                                 'espesor': nww_data_df.loc[0,'espesor'],\
+                                 'largo': nww_data_df.loc[0,'largo'],\
+                                 'parF': nww_data_df.loc[0,'param_f'],\
+                                 'sdate': nww_data_df.loc[0,'ship_date'],\
+                                 'status': nww_status_var, \
+                                 'parF': nww_data_df.loc[0,'param_f'],\
+                                 'sgrade': nww_data_df.loc[0,'sgrade']}]).to_json(\
+                                            orient="records")
+                            rep= asf.msg_to_agnt(st,msgl.loc[0,'id'])
+                            await self.send(rep)
+
+            if nww_status_var == "post-auction":
+                diff=(datetime.datetime.now()-post_auction_step).total_seconds()
+                # print(' Post-Auction: ' + str(coil_msgs_df2.shape[0]) +\
+                #                             ' Sncds:'+ str(diff))
+                # print(globals.tosend)
+                if coil_notified < (coil_msgs_df2.shape[0]-1) and pending_au and \
+                                coil_msgs_df2.shape[0] > 0  and diff > 25 :
+                    coil_notified    = coil_notified + 1
+                    i = coil_msgs_df2.index[coil_notified]
+                    """Evaluate extra bids and give a rating"""
+                    nww_data_df.loc[0, 'auction_level'] = 3  # third level
+                    coil_jid_winner_f= results_2.loc[i,'Coil']
+                    coil_jid_winner  = coil_jid_winner_f.split('@')[0]
+                    winner_df = results_2.loc[i:i,:]
+                    winner_df = winner_df.reset_index(drop=True)
+                    profit    = float(results_2.loc[i, 'Profit'])
+                    post_auction_step= datetime.datetime.now()   # Reset to follow up
+                    # print(' coil_notif:' + str(coil_notified))
+                    #
+                    if profit >= 0.1:
+                        winner_df.at[0, 'bid_status'] = 'acceptedbid'
+                        nww_data_df.at[0,'bid_status'] = 'acceptedbid'
+                        nww_data_df.loc[0,'accumulated_profit'] = nww_data_df.loc[0,\
+                                   'accumulated_profit'] + winner_df.loc[0, 'Profit']
+                        """Inform log """
+                        nww_log_msg = asf.send_nww(my_full_name, number, \
+                                    nww_data_df.at[0, 'auction_level'], \
+                                    coil_jid_winner_f)
+                        nww_log_json= nww_log_msg.to_json(orient="records")
+                        nww_msg_log = asf.msg_to_log(nww_log_json, my_dir)
+                        await self.send(nww_msg_log)
+                        """ Ask winner coil for OK """
+                        id_org  = int(random.random()*10000)
+                        cl_agent= asf.rq_list(my_full_name,winner_df,\
+                                    coil_jid_winner,'confirm',id_org)
+                        cl_ans  = asf.contact_list_json(cl_agent,coil_jid_winner_f)
+                        await self.send(cl_ans)
+                        curr = datetime.datetime.now()
+                        globals.tosend.append({'idorg':id_org,'agnt_org': \
+                                    globals.gnww_jid,'act':'confirm',\
+                                    'agnt_dst':coil_jid_winner,'dt':curr,\
+                                    'st':'post-auction'})
+                        pending_au = False
+                        # print(" Confirming:")
+                        # print(cl_agent)
+                        # print(globals.tosend)
+                    else:
+                        """inform log of issue"""
+                        nww_msg_log_body = f'coil {coil_jid_winner_f} does not bring '
+                        nww_msg_log_body = nww_msg_log_body + f'positive benefit to {my_full_name}'
+                        nww_msg_log_body = asf.inform_error(nww_msg_log_body)
+                        nww_msg_log = asf.msg_to_log(nww_msg_log_body, my_dir)
+                        await self.send(nww_msg_log)
+                        id_org  = int(random.random()*10000)
+                        cl_agent= asf.rq_list(my_full_name,winner_df,\
+                                    coil_jid_winner_f,'notprofit',id_org)
+                        cl_ans  = asf.contact_list_json(cl_agent,coil_jid_winner_f)
+                        await self.send(cl_ans)
+                        # print('not profit => '+ cl_ans.body)
+
+                elif coil_notified == coil_msgs_df2.shape[0]-1:
+                    """ Post auction ended """
+                    # print('C_Notified: '+ str(coil_notified))
+                    auction_df.at[0, 'number_auction_completed'] = auction_df.at[\
+                                    0, 'number_auction_completed'] + 1
+                    nww_status_var = "stand-by"
+                    coil_msgs_df = coil_msgs_df.drop(coil_msgs_df.index)
+                    coil_msgs_df2= coil_msgs_df2.drop(coil_msgs_df2.index)
+                    coil_msgs_df3= coil_msgs_df3.drop(coil_msgs_df3.index)
+                    globals.tosend = []
+                    globals.ret_dact= 0
+                    pending_au = True
+                    all_auctions = pd.concat([all_auctions, process_df],\
+                                        ignore_index=True)
+                    process_df = pd.DataFrame([], columns=['fab_start', \
+                                'processing_time', 'start_auction_before', \
+                                'start_next_auction_at','setup_speed', \
+                                'ancho','largo', 'espesor'])
+                    process_df.at[0, 'start_next_auction_at'] = datetime.datetime.now() + \
+                                 datetime.timedelta(seconds=start_auction_before)
+                    process_df.at[0,'setup_speed'] = 0.25 # Normal speed 15000 mm/min in m/s
+                    process_df.at[0, 'start_auction_before'] = datetime.datetime.now()
+                #
+                msg_ag = await self.receive(timeout=wait_msg_time)
+                if msg_ag:
+                    # print( 'Post-auction MSG:' + msg_ag.body)
+                    # print(globals.tosend)
+                    recl = re.match(r'^c\d+',str(msg_ag.sender)) # Message from coils
+                    if recl is not None: # Message from coil agents
+                        coil_jid = str(msg_ag.sender)
+                        msg_snd_jid = coil_jid.split('/')[0]
+                        cl_df = pd.read_json(msg_ag.body)
+                        seqce = cl_df.loc[0,'seq']
+                        coil_msg_df3 = pd.read_json(cl_df.loc[0,'msg'])
+                        # print(' => ')
+                        #
+                        if cl_df.loc[0, 'purpose'] == 'OKacceptedbid':
+                            """Save winner information"""
+                            auction_df.at[0, 'coil_ratings'] = [coil_msg_df3.to_dict(\
+                                    orient="records")]  # Save information to auction df
+                            """Calculate processing time"""
+                            coil_msg_df3.loc[0,'setup_speed'] = speed
+                            process_df = asf.set_process_df(process_df, coil_msg_df3, cl_df)
+                            """Inform log of assignation and auction KPIs"""
+                            if not math.isnan(coil_msg_df3.at[0,'counterbid']):
+                                counterbid_win = coil_msg_df3.loc[0,'counterbid']
+                            else:
+                                counterbid_win = coil_msg_df3.loc[0,'bid']
+                            auction_df.at[0, 'number_auction_completed'] = auction_df.at[\
+                                        0, 'number_auction_completed'] + 1
+                            number = int(auction_df.at[0, 'number_auction_completed'])
+                            nww_msg_log_body = asf.auction_nww_kpis(nww_data_df, coil_msg_df3,\
+                                        auction_df, process_df, winner_df)
+                            nww_msg_log = asf.msg_to_log(nww_msg_log_body.to_json(\
+                                        orient="records"), my_dir)
+                            await self.send(nww_msg_log)
+
+
+                            if (winner_df.loc[0,'F_group'] == nww_prev_coil_df.loc[0,'F_group']):
+                                lot_size=lot_size + winner_df.loc[0,'peso']
+                            else:
+                                lot_size=int(0)
+
+                            nww_prev_coil_df = nww_data_df[['largo','ancho','espesor','param_f','F_group']]
+
+                            pft     = winner_df.loc[0,'Profit']
+                            dtw     = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                            idord   = coil_msg_df3.loc[0,'id']
+                            msg_str = f'AU_ENDED:{my_full_name}, auction:{number} '
+                            msg_str = msg_str+f', winner:{idord}, price:{counterbid_win}'
+                            msg_str = msg_str+f', profit:{pft}, date: {dtw}'
+                            #
+                            cl_msg_lbdy = asf.inform_log(my_full_name,\
+                                        msg_str,globals.glog_jid)
+                            cl_msg_lg_bd= cl_msg_lbdy.to_json(orient="records")
+                            coil_msg_log= asf.msg_to_log(cl_msg_lg_bd, my_dir)
+                            await self.send(coil_msg_log)
+                            #
+                            # Message to cancel other waiting coils ...
+                            if len(results_2)>1:
+                                for k in coil_msg_df2.index:
+                                    if coil_msgs_df2.loc[k,'id'] != coil_msg_df3.loc[0,'id']:
+                                        idc = coil_msgs_df2.loc[k,'id']
+                                        tsnd= globals.tosend
+                                        idt = self.find_qry('agnt_dst',idc.split('@')[0])
+                                        if idt:
+                                            glist = self.del_agnt(idt,globals.tosend)
+                                            globals.tosend = glist
+                            nww_status_var = "stand-by"
+                            coil_msgs_df = coil_msgs_df.drop(coil_msgs_df.index)
+                            coil_msgs_df2= coil_msgs_df2.drop(coil_msgs_df2.index)
+                            coil_msgs_df3= coil_msgs_df3.drop(coil_msgs_df3.index)
+                            globals.tosend = []
+                            globals.ret_dact= 0
+                            pending_au = True
+                            all_auctions = pd.concat([all_auctions, process_df],\
+                                                ignore_index=True)
+                            process_df = pd.DataFrame([], columns=['fab_start', \
+                                        'processing_time', 'start_auction_before', \
+                                        'start_next_auction_at','setup_speed', \
+                                        'ancho','largo', 'espesor', 'param_f'])
+                            process_df.at[0, 'start_next_auction_at'] = datetime.datetime.now() + \
+                                         datetime.timedelta(seconds=start_auction_before)
+                            process_df.at[0,'setup_speed'] = 0.25 # Normal speed 15000 mm/min in m/s
+                            process_df.at[0, 'start_auction_before'] = datetime.datetime.now()
+                        #
+                        elif cl_df.loc[0, 'purpose'] == 'NOTacceptedbid':
+                            msg_str = f'{my_full_name} rejected the auction'
+                            msg_str = msg_str + f' number: {number}'
+                            cl_msg_lbdy = asf.inform_log(my_full_name,\
+                                                msg_str,globals.glog_jid)
+                            cl_msg_lg_bd = cl_msg_lbdy.to_json(orient="records")
+                            coil_msg_log = asf.msg_to_log(cl_msg_lg_bd, my_dir)
+                            await self.send(coil_msg_log)
+                            pending_au = True
+                        else:
+                            # print(' ** Err: '+ str(len(globals.tosend))+ ' diff:'+ str(diff))
+                            rep_pauction = rep_pauction + 1
+                            if rep_pauction > 5:
+                                nww_status_var = 'pre-auction'
+                                rep_pauction = 0
+                        glist = self.del_agnt(seqce,globals.tosend)
+                        globals.tosend = glist
+                        # print(' ** Err2: '+ str(len(globals.tosend)))
+                        # print(globals.tosend)
+                    elif 'LAUN' in str(msg_ag.sender).upper():
+                        # Message from Launcher requesting parameter update ...
+                        msgl = pd.read_json(msg_ag.body)
+                        msg_sender_jid = str(msg_ag.sender).split('/')[0]
+                        if msgl.loc[0,'purpose'] == 'exit':
+                            await self.ask_exit() # To log ...
+                            self.kill() # To end.
+                        elif msgl.loc[0,'purpose'] == 'search':
+                            #
+                            id_ag = msgl.loc[0,'seq']
+                            cl_ag = asf.rq_list(my_full_name, all_auctions, \
+                                         msg_sender_jid,'history',id_ag)
+                            cnt_lst = asf.contact_list_json(cl_ag,msg_sender_jid)
+                            await self.send(cnt_lst)
+                        elif msgl.loc[0,'purpose'] == 'status_nww':
+                            #
+                            # Answering current properties to browser.
+                            st = pd.DataFrame([{\
+                                 'Code':nww_data_df.loc[0,'id'],\
+                                 'From':nww_data_df.loc[0,'oname'],\
+                                 'msg': nww_data_df.loc[0,'name'], \
+                                 'Location': nww_data_df.loc[0,'From'],
+                                 'Capacity': nww_data_df.loc[0,'budget'], \
+                                 'purpose':'report', \
+                                 'ancho':nww_data_df.loc[0,'ancho'],\
+                                 'espesor': nww_data_df.loc[0,'espesor'],\
+                                 'largo': nww_data_df.loc[0,'largo'],\
+                                 'parF': nww_data_df.loc[0,'param_f'],\
+                                 'sdate': nww_data_df.loc[0,'ship_date'],\
+                                 'status': nww_status_var, \
+                                 'parF': nww_data_df.loc[0,'param_f'],\
+                                 'sgrade': nww_data_df.loc[0,'sgrade']}]).to_json(\
+                                            orient="records")
+                            rep= asf.msg_to_agnt(st,msgl.loc[0,'id'])
+                            await self.send(rep)
+                        elif msgl.loc[0,'purpose'] == 'searchst':
+                            #
+                            id_ag = msgl.loc[0,'seq']
+                            if nww_status_var == 'pre-auction':
+                                dff = coil_msgs_df
+                            if nww_status_var == 'auction':
+                                dff = coil_msgs_df2
+                            if nww_status_var == 'post-auction':
+                                dff = coil_msgs_df3
+                            cl_ag = asf.rq_list(my_full_name, dff, \
+                                         msg_sender_jid,'history',id_ag)
+                            cnt_lst = asf.contact_list_json(cl_ag,msg_sender_jid)
+                            await self.send(cnt_lst)
+
+                if diff > 160:
+                    # After 10 mins without answer we drop off the auction
+                    for k in coil_msgs_df2.index:
+                        idc = coil_msgs_df2.loc[k,'id']
+                        tsnd= globals.tosend
+                        if len(tsnd) > 0:
+                            ipc = self.find_qry('agnt_dst',idc.split('@')[0])
+                            if ipc:
+                                glist = self.del_agnt(ipc,globals.tosend)
+                                globals.tosend = glist
+                    nww_status_var = "stand-by"
+                    coil_msgs_df = coil_msgs_df.drop(coil_msgs_df.index)
+                    coil_msgs_df2= coil_msgs_df2.drop(coil_msgs_df2.index)
+                    coil_msgs_df3= coil_msgs_df3.drop(coil_msgs_df3.index)
+                    globals.tosend = []
+                    globals.ret_dact= 0
+                    all_auctions = pd.concat([all_auctions, process_df],\
+                                        ignore_index=True)
+                    pending_au = True
+                    process_df = pd.DataFrame([], columns=['fab_start', 'processing_time', \
+                                 'start_auction_before', 'start_next_auction_at',\
+                                'setup_speed', 'ancho','largo', 'espesor','param_f'])
+                    process_df.at[0, 'start_next_auction_at'] = datetime.datetime.now() + \
+                                 datetime.timedelta(seconds=start_auction_before)
+                    process_df.at[0,'setup_speed'] = 0.25 # Normal speed 15000 mm/min in m/s
+                    process_df.at[0, 'start_auction_before'] = datetime.datetime.now()
+            #
+            # stand-by status for VA is very useful. It changes to pre-auction.
+            elif nww_status_var == "stand-by":
+                """ Starts next auction when there is some time left
+                    before current fab ends """
+                if len(globals.tosend) == 0:
                     nww_status_var = 'pre-auction'
+                if len(globals.tosend) > 0:
+                    act = globals.tosend[0]['act']
+                    if act == 'invitation':
+                        nww_status_var = 'pre-auction'
+                    elif act == 'counterbid':
+                        nww_status_var = 'auction'
+                # print(' stand-by => '+ va_status_var)
+
             else:
                 """inform log of status"""
-                nww_inform_json = opf.inform_log_df(my_full_name, nww_status_started_at, nww_status_var).to_json()
-                nww_msg_log = opf.msg_to_log(nww_inform_json, my_dir)
-                await self.send(nww_msg_log)
-                nww_status_var = "stand-by"
+                if 'auction' not in nww_status_var:
+                    nww_inform_json = asf.inform_log_df(my_full_name, 'nww',nww_status_started_at, nww_status_var).to_json(orient="records")
+                    nww_msg_log = asf.msg_to_log(nww_inform_json, my_dir)
+                    await self.send(nww_msg_log)
+                    # print(' Unknown => '+ va_status_var)
+                    # va_status_var = "stand-by"
 
-    async def on_end(self):
-        print({self.counter})
+        async def ask_exit(self):
+            global nww_status_var, number, coil_msgs_df, coil_msgs_df2,\
+                        coil_msgs_df3, all_auctions, seq_nww
+            dtw = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            lcbs= []
+            if coil_msgs_df.shape[0] > 0:
+                lcbs= coil_msgs_df['id'].to_list()
+            lcb2= []
+            if coil_msgs_df2.shape[0] > 0:
+                lcb2= coil_msgs_df2['id'].to_list()
+            lcb3= []
+            if coil_msgs_df3.shape[0] > 0:
+                lcb3= coil_msgs_df3['id'].to_list()
+            reg_cl = pd.DataFrame([{'id':globals.gnww_jid,'status':nww_status_var,\
+                                    'auction':seq_nww,'date':dtw,'coils_bid': lcbs,\
+                                    'coils_cbid': lcb2,'coils_solv': lcb3,\
+                                    'msg': 'Launcher requests to exit.'}])
+            log_body    = asf.inform_log(my_full_name,\
+                                reg_cl,globals.glog_jid)
+            coil_msg_log = asf.msg_to_log(log_body, my_dir)
+            await self.send(coil_msg_log)
+            log_body    = asf.inform_log(my_full_name,\
+                                all_auctions,globals.glog_jid)
+            coil_msg_log = asf.msg_to_log(log_body, my_dir)
+            await self.send(coil_msg_log)
+            time.sleep(1)
 
-    async def on_start(self):
-        self.counter = 1
+        async def ask_coils(self):
+            r = 'Request coil list'
+            seqce    = int(random.random()*10000)
+            rq_clist = asf.rq_list(my_full_name, r, globals.gbrw_jid,\
+                                   'getlist',seqce)
+            r_clist  = asf.contact_list_json(rq_clist,'browser')
+            await self.send(r_clist)
+            return([seqce,rq_clist])
 
-async def setup(self):
-    start_at = datetime.datetime.now() + datetime.timedelta(seconds=3)
-    b = self.NWWBehav(period=3, start_at=start_at)  # periodic sender
-    template = Template()
-    template.metadata = {"performative": "inform"}
-    self.add_behaviour(b)
+        def ret_agnt(self,id_agnt):
+            for idct in globals.tosend:
+                if idct['idorg'] == id_agnt:
+                    return([idct['act'], idct['st']])
 
+        def del_agnt(self,id_agnt,glist):
+            rem = -1
+            for inum in range(len(glist)):
+                idct = glist[inum]
+                if idct['idorg'] == id_agnt:
+                    rem = inum
+            if rem > -1:
+                glist.pop(rem)
+            return(glist)
 
+        def act_qry(self,act,st):
+            i = 0
+            for idct in globals.tosend:
+                if idct['act'] == act and idct['st']==st:
+                    i = i + 1
+            return(i)
+
+        def find_qry(self,field,val):
+            for idct in globals.tosend:
+                if str(val).upper() in str(idct[field]).upper():
+                    return(idct['idorg'])
+            return(None)
+
+        def min_dt(self,act,st):
+            low0 = datetime.datetime.now()
+            low  = low0
+            for idct in globals.tosend:
+                if idct['act'] == act and idct['st'] == st:
+                    low = min(idct['dt'],low)
+            return([low,low0])
+
+        async def on_end(self):
+            va_msg_ended = asf.send_activation_finish(my_full_name, ip_machine, 'end')
+            va_msg       = asf.msg_to_log(va_msg_ended, my_dir)
+            await self.send(va_msg)
+            await self.presence.unsubscribe(globals.gbrw_jid)
+            await self.agent.stop()
+
+        async def on_end(self):
+            nww_msg_ended = asf.send_activation_finish(my_full_name, ip_machine, 'end')
+            nww_msg       = asf.msg_to_log(nww_msg_ended, my_dir)
+            await self.send(nww_msg)
+            await self.presence.unsubscribe(globals.gbrw_jid)
+            await self.agent.stop()
+
+        async def on_start(self):
+            global nww_msg_log, auction_start, pre_auction_start
+            self.counter = 1
+            coil_msgs_df  = pd.DataFrame()
+            coil_msgs_df2 = pd.DataFrame()
+            coil_msgs_df3 = pd.DataFrame()
+            """Inform log """
+            nww_msg_start = asf.send_activation_finish(my_full_name, \
+                    ip_machine, 'start')
+            nww_msg_log = asf.msg_to_log(nww_msg_start, my_dir)
+            await self.send(nww_msg_log)
+            nww_activation_json = asf.activation_df(my_full_name,\
+                    nww_status_started_at,globals.gnww_jid)
+            nww_msg_lg = asf.msg_to_log(nww_activation_json, my_dir)
+            await self.send(nww_msg_lg)
+
+    async def setup(self):
+        # start_at = datetime.datetime.now() + datetime.timedelta(seconds=3)
+        # b = self.NWWBehav(period=3, start_at=start_at)  # periodic sender
+        b = self.NWWBehav()  # periodic sender
+        template = Template()
+        template.metadata = {"performative": "inform"}
+        self.add_behaviour(b,template)
 
 if __name__ == "__main__":
     """Parser parameters"""
@@ -690,40 +765,93 @@ if __name__ == "__main__":
     parser.add_argument('-an', '--agent_number', type=int, metavar='', required=False, default=1, help='agent_number: 1,3,4')
     parser.add_argument('-w', '--wait_msg_time', type=int, metavar='', required=False, default=20, help='wait_msg_time: time in seconds to wait for a msg')
     parser.add_argument('-st', '--stop_time', type=int, metavar='', required=False, default=84600, help='stop_time: time in seconds where agent')
-    parser.add_argument('-s', '--status', type=str, metavar='', required=False, default='stand-by', help='status_var: on, stand-by, Off')
+    parser.add_argument('-s', '--status', type=str, metavar='', required=False, default='pre-auction', help='status_var: on, stand-by, Off')
     parser.add_argument('-sab', '--start_auction_before', type=int, metavar='', required=False, default=10, help='start_auction_before: seconds to start auction prior to current fab ends')
+    parser.add_argument('-sd', '--speed', type=float, metavar='', required=False, default=0.25, help='NWW speed. Example --speed 0.25 ')
     parser.add_argument('-tc', '--transport_agent', type=str, metavar='', required=False, default='no', help='transport_agent: yes, no')
     parser.add_argument('-wh', '--warehouse_agent', type=str, metavar='', required=False, default='no', help='wharehouse_agent: yes, no')
+    # MANAGEMENT DATA
+    parser.add_argument('-u', '--user_name', type=str, metavar='', required=False, help='User to the XMPP platform')  # JOM 10/10
+    parser.add_argument('-p', '--user_passwd', type=str, metavar='', required=False, help='Passwd for the XMPP platform')  # JOM 10/10
+    parser.add_argument('-lag', '--log_agnt_id', type=str, metavar='', required=False, help='User ID for the log agent')
+    parser.add_argument('-bag', '--brw_agnt_id', type=str, metavar='', required=False, help='User ID for the browser agent')
+
 
     args = parser.parse_args()
     my_dir = os.getcwd()
     my_name = os.path.basename(__file__)[:-3]
-    my_full_name = opf.my_full_name(my_name, args.agent_number)
+    my_full_name = asf.my_full_name(my_name, args.agent_number)
     wait_msg_time = args.wait_msg_time
-    nww_status_started_at = datetime.datetime.now().time()
+    nww_status_started_at = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     nww_status_refresh = datetime.datetime.now() + datetime.timedelta(seconds=5)
     nww_status_var = args.status
     start_auction_before = args.start_auction_before
+    speed = args.speed
     transport_needed= args.transport_agent
     warehouse_needed=args.warehouse_agent
     """Save to csv who I am"""
-    nww_data_df= opf.set_agent_parameters(my_dir, my_name, my_full_name)
-    nww_prev_coil_df = nww_data_df[['coil_length','coil_width','coil_thickness','coil_weight','parameter_F', 'F_group','lot_size']]
-    auction_df = opf.auction_blank_df()
-    process_df = pd.DataFrame([], columns=['fab_start', 'processing_time', 'start_auction_before', 'start_next_auction_at', 'fab_end', 'From','parameter_F','F_group', 'lot_size', 'coil_width','cooling_time','lot_number'])
-    process_df.at[0, 'start_next_auction_at'] = datetime.datetime.now() + datetime.timedelta(seconds=start_auction_before)
+    nww_data_df = asf.set_agent_parameters(my_name, my_full_name,950,0.8,4950,40,'X500','F','')
+    nww_prev_coil_df = nww_data_df[['largo','ancho','espesor','param_f', 'F_group']]
+    nww_data_df['accumulated_profit'] = 0
+    process_df = pd.DataFrame([], columns=['fab_start', 'processing_time', \
+                 'start_auction_before', 'start_next_auction_at',\
+                'setup_speed', 'ancho','largo', 'espesor','param_f'])
+    process_df.at[0, 'start_next_auction_at'] = datetime.datetime.now() + \
+                 datetime.timedelta(seconds=start_auction_before)
+    process_df.at[0,'setup_speed'] = 0.25 # Normal speed 15000 mm/min in m/s
+    process_df.at[0, 'start_auction_before'] = datetime.datetime.now()
     fab_started_at = datetime.datetime.now()
+    auction_df = asf.auction_blank_df()
+    auction_df.at[0, 'number_preauction'] = 0
+    auction_df.at[0, 'number_auction'] = 0
+    auction_df.at[0, 'number_auction_completed'] = 0
+    all_auctions = pd.DataFrame()
     leeway = datetime.timedelta(minutes=int(2))  # with fab process time ranging between 8-10 min, and tr op time between 3-4 min. Max dif between estimation and reality is 3min.
     op_times_df = pd.DataFrame([], columns=['AVG(nww_op_time)', 'AVG(tr_op_time)'])
     lot_size=int(0)
-    auction_start = ""
+    seq_nww = int(0)
     nww_to_tr_df = pd.DataFrame()
+
+    "IP"
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    s.connect(("8.8.8.8", 80))
+    ip_machine = s.getsockname()[0]
+    globals.IP = ip_machine
+
     """XMPP info"""
-    nww_jid = opf.agent_jid(my_dir, my_full_name)
-    nww_passwd = opf.agent_passwd(my_dir, my_full_name)
+    if hasattr(args,'log_agnt_id') :
+        glog_jid = args.log_agnt_id
+        globals.glog_jid = glog_jid
+    if hasattr(args,'brw_agnt_id') :
+        gbrw_jid = args.brw_agnt_id
+        globals.gbrw_jid = gbrw_jid
+    if hasattr(args,'lhr_agnt_id') :
+        glhr_jid = args.lhr_agnt_id
+        globals.glhr_jid = glhr_jid
+    if len(args.user_name) > 0:
+        nww_jid = args.user_name
+    else:
+        nww_jid = asf.agent_jid(my_dir, my_full_name)
+    if len(args.user_passwd) > 0:
+        nww_passwd = args.user_passwd
+    else:
+        nww_passwd = asf.agent_passwd(my_dir, my_full_name)
+        nww_jid = asf.agent_jid(my_dir, my_full_name)
+
+    globals.gnww_jid = nww_jid
+    globals.tosend  = []
+    globals.ret_dact= 0
+    pre_auction_start = datetime.datetime.now() - datetime.timedelta(\
+                        seconds=90)
+    coil_msgs_df    = pd.DataFrame()
+    coil_msgs_df2   = pd.DataFrame()
+    coil_msgs_df3   = pd.DataFrame()
+    auction_start   = datetime.datetime.now()
+    #
     nww_agent = TemperRollingAgent(nww_jid, nww_passwd)
     future = nww_agent.start(auto_register=True)
     future.result()
+
     """Counter"""
     stop_time = datetime.datetime.now() + datetime.timedelta(seconds=args.stop_time)
     while datetime.datetime.now() < stop_time:

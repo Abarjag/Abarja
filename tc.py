@@ -23,7 +23,7 @@ class TransportAgent(Agent):
             await self.send(tr_msg_log)
             if tr_status_var == "on":
                 """inform log of status"""
-                tr_inform_json = opf.inform_log_df(my_full_name, tr_status_started_at, tr_status_var).to_json()
+                tr_inform_json = opf.inform_log_df(my_full_name, 'tc',tr_status_started_at, tr_status_var).to_json()
                 tr_msg_log = opf.msg_to_log(tr_inform_json, my_dir)
                 await self.send(tr_msg_log)
                 nww_tr_msg = await self.receive(timeout=wait_msg_time)  # wait for a message for 5 seconds
@@ -62,19 +62,19 @@ class TransportAgent(Agent):
                     await self.send(tr_msg_log)
             elif tr_status_var == "stand-by":  # stand-by status for TR is not very useful, just in case we need the agent to be alive, but not operative. At the moment, it won´t change to stand-by.
                 """inform log of status"""
-                tr_inform_json = opf.inform_log_df(my_full_name, tr_status_started_at, tr_status_var).to_json()
+                tr_inform_json = opf.inform_log_df(my_full_name,'tc', tr_status_started_at, tr_status_var).to_json()
                 tr_msg_log = opf.msg_to_log(tr_inform_json, my_dir)
                 await self.send(tr_msg_log)
                 # We could introduce here a condition to be met to change to "on"
                 # now it just changes directly to auction
                 """inform log of status"""
                 tr_status_var = "on"
-                tr_inform_json = opf.inform_log_df(my_full_name, tr_status_started_at, tr_status_var).to_json()
+                tr_inform_json = opf.inform_log_df(my_full_name,'tc', tr_status_started_at, tr_status_var).to_json()
                 tr_msg_log = opf.msg_to_log(tr_inform_json, my_dir)
                 await self.send(tr_msg_log)
             else:
                 """inform log of status"""
-                tr_inform_json = opf.inform_log_df(my_full_name, tr_status_started_at, tr_status_var).to_json()
+                tr_inform_json = opf.inform_log_df(my_full_name,'tc', tr_status_started_at, tr_status_var).to_json()
                 tr_msg_log = opf.msg_to_log(tr_inform_json, my_dir)
                 await self.send(tr_msg_log)
                 tr_status_var = "stand-by"
@@ -105,11 +105,11 @@ if __name__ == "__main__":
     my_name = os.path.basename(__file__)[:-3]
     my_full_name = opf.my_full_name(my_name, args.agent_number)
     wait_msg_time = args.wait_msg_time
-    tr_status_started_at = datetime.datetime.now().time()
+    tr_status_started_at = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     tr_status_refresh = datetime.datetime.now() + datetime.timedelta(seconds=5)
     tr_status_var = args.status
     """Save to csv who I am"""
-    tc_data = opf.set_agent_parameters(my_dir, my_name, my_full_name)
+    opf.set_agent_parameters(my_dir, my_name, my_full_name,0,0,0,'','','')
     opf.tr_create_booking_register(my_dir, my_full_name)  # register to store bookings
     """XMPP info"""
     tr_jid = opf.agent_jid(my_dir, my_full_name)
